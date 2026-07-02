@@ -33,6 +33,16 @@ class ItemStatus(enum.StrEnum):
     archived = "archived"
 
 
+class TaggingStatus(enum.StrEnum):
+    pending = "pending"
+    tagged = "tagged"
+
+
+class TaggedBy(enum.StrEnum):
+    auto = "auto"
+    manual = "manual"
+
+
 class ClothingItem(Base):
     __tablename__ = "clothing_items"
 
@@ -68,6 +78,17 @@ class ClothingItem(Base):
     ai_processed: Mapped[bool] = mapped_column(Boolean, default=False)
     ai_confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2))
     ai_raw_response: Mapped[dict | None] = mapped_column(JSONB)
+
+    # Tagging lifecycle
+    tagging_status: Mapped[TaggingStatus] = mapped_column(
+        Enum(TaggingStatus, name="tagging_status", create_type=False),
+        default=TaggingStatus.pending,
+        nullable=False,
+    )
+    tagged_by: Mapped[TaggedBy | None] = mapped_column(
+        Enum(TaggedBy, name="tagged_by", create_type=False)
+    )
+    tagged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Usage tracking
     wear_count: Mapped[int] = mapped_column(Integer, default=0)

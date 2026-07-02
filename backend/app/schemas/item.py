@@ -88,6 +88,9 @@ class ItemResponse(ItemBase):
     formality: str | None = None
     season: list[str] = Field(default_factory=list)
     status: str
+    tagging_status: str = "pending"
+    tagged_by: str | None = None
+    tagged_at: datetime | None = None
     ai_processed: bool = False
     ai_confidence: Decimal | None = None
     ai_description: str | None = None
@@ -147,6 +150,7 @@ class ItemFilter(BaseModel):
     subtype: str | None = None
     colors: list[str] | None = None
     status: str | None = None
+    tagging_status: str | None = None
     favorite: bool | None = None
     needs_wash: bool | None = None
     is_archived: bool = False
