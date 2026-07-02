@@ -1,4 +1,5 @@
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -6,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.models.item import ClothingItem, ItemStatus
+from app.models.item import ClothingItem, ItemStatus, TaggedBy, TaggingStatus
 from app.services.ai_service import AIService, ClothingTags
 from app.workers.db import get_db_session
 
@@ -47,6 +48,9 @@ def tags_to_item_fields(tags: ClothingTags, raw_response: str | None = None) -> 
         "ai_confidence": tags.confidence,
         "ai_description": tags.description,  # Human-readable description
         "status": ItemStatus.ready,
+        "tagging_status": TaggingStatus.tagged,
+        "tagged_by": TaggedBy.auto,
+        "tagged_at": datetime.now(UTC),
     }
     if raw_response:
         fields["ai_raw_response"] = {"raw_text": raw_response}
@@ -60,6 +64,7 @@ async def mark_item_tagging_skipped(ctx: dict, item_id: str) -> None:
         item = result.scalar_one_or_none()
         if item and item.status == ItemStatus.processing:
             item.status = ItemStatus.ready
+            item.tagging_status = TaggingStatus.pending
             await db.commit()
     finally:
         await db.close()
@@ -165,6 +170,9 @@ async def tag_item_image(ctx: dict, item_id: str, image_path: str) -> dict[str, 
                     "ai_raw_response",
                     "tags",
                     "ai_description",
+                    "tagging_status",
+                    "tagged_by",
+                    "tagged_at",
                 ):
                     setattr(item, field, value)
                 # Only update content fields if user hasn't set them (or they're default/unknown)
