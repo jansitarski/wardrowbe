@@ -32,9 +32,9 @@ async def capabilities() -> dict[str, Any]:
             "vision": settings.effective_ai_vision_enabled,
             "text": settings.effective_ai_text_enabled,
         },
-        # Set to True in PR 2-3 when agent write-back endpoints exist.
+        # Set to True when the agent write-back endpoints for outfits exist.
         "features": {
-            "external_tagging": False,
+            "external_tagging": True,
             "external_suggestions": False,
             "external_pairings": False,
         },
