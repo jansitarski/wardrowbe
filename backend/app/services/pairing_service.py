@@ -3,14 +3,14 @@ import logging
 import re
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.item import ClothingItem, ItemStatus
 from app.models.outfit import FamilyOutfitRating, Outfit, OutfitItem, OutfitSource, OutfitStatus
 from app.models.user import User
-from app.services.ai_service import AIService, require_internal_ai
+from app.services.ai_service import AIResponseTruncatedError, AIService, require_internal_ai
 from app.utils.clothing import deduplicate_by_body_slot
 from app.utils.prompts import load_prompt
 from app.utils.timezone import get_user_today
@@ -18,6 +18,18 @@ from app.utils.timezone import get_user_today
 logger = logging.getLogger(__name__)
 
 PAIRING_PROMPT_TEMPLATE = load_prompt("item_pairing")
+
+# A pairing is an internally-generated row, or an externally-authored one carrying the
+# server-set "pairing" occasion (external rows with any other occasion are suggestions).
+# Keyed on occasion rather than source_item_id because that column is ON DELETE SET NULL:
+# hard-deleting the source item must not silently reclassify the row as a suggestion.
+# "pairing" is absent from VALID_OCCASIONS, so an authoring client cannot forge it.
+PAIRING_OCCASION = "pairing"
+
+PAIRING_SOURCE_CLAUSE = or_(
+    Outfit.source == OutfitSource.pairing,
+    and_(Outfit.source == OutfitSource.external, Outfit.occasion == PAIRING_OCCASION),
+)
 
 
 class PairingService:
@@ -214,6 +226,11 @@ class PairingService:
             logger.info(f"AI pairings generated (model: {result.model})")
             logger.debug(f"AI raw response: {result.content[:500]}")
             pairings_data = self._parse_ai_response(result.content)
+        except AIResponseTruncatedError as e:
+            # Preserve the specific, actionable cause: the endpoint responded
+            # successfully but produced no content (see AIResponseTruncatedError).
+            logger.error(f"AI pairing generation failed: {e}")
+            raise AIGenerationError(str(e)) from e
         except Exception as e:
             logger.error(f"AI pairing generation failed: {e}")
             raise AIGenerationError(
@@ -258,7 +275,7 @@ class PairingService:
             # Create outfit
             outfit = Outfit(
                 user_id=user.id,
-                occasion="pairing",
+                occasion=PAIRING_OCCASION,
                 scheduled_for=user_today,
                 source=OutfitSource.pairing,
                 source_item_id=source_item_id,
@@ -312,7 +329,7 @@ class PairingService:
         base_query = select(Outfit).where(
             and_(
                 Outfit.user_id == user_id,
-                Outfit.source == OutfitSource.pairing,
+                PAIRING_SOURCE_CLAUSE,
                 Outfit.source_item_id == source_item_id,
             )
         )
@@ -322,7 +339,7 @@ class PairingService:
             select(Outfit.id).where(
                 and_(
                     Outfit.user_id == user_id,
-                    Outfit.source == OutfitSource.pairing,
+                    PAIRING_SOURCE_CLAUSE,
                     Outfit.source_item_id == source_item_id,
                 )
             )
@@ -357,7 +374,7 @@ class PairingService:
         # Base conditions
         conditions = [
             Outfit.user_id == user_id,
-            Outfit.source == OutfitSource.pairing,
+            PAIRING_SOURCE_CLAUSE,
         ]
 
         # Filter by source item type if specified

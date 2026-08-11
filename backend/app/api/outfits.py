@@ -22,7 +22,9 @@ from app.models.outfit import (
 )
 from app.models.user import User
 from app.schemas.item import DEFAULT_WASH_INTERVALS
+from app.schemas.outfit import MAX_AUTHORING_TEXT_LENGTH, OutfitAttributeFields
 from app.services.ai_service import AIDisabledError
+from app.services.external_outfit_service import ExternalOutfitService
 from app.services.item_service import ItemService
 from app.services.learning_service import LearningService
 from app.services.outfit_service import OutfitListFilters, OutfitService
@@ -188,6 +190,10 @@ class OutfitResponse(BaseModel):
     source: str
     reasoning: str | None = None
     style_notes: str | None = None
+    season: str | None = None
+    formality: str | None = None
+    palette: list[str] | None = None
+    notes: str | None = None
     highlights: list[str] | None = None
     weather: dict | None = None
     items: list[OutfitItemResponse]
@@ -205,6 +211,42 @@ class OutfitListResponse(BaseModel):
     page: int
     page_size: int
     has_more: bool
+
+
+class BulkOutfitFilters(BaseModel):
+    status_filter: str | None = None
+    occasion: str | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+    source: str | None = None
+    is_lookbook: bool | None = None
+    is_replacement: bool | None = None
+    has_source_item: bool | None = None
+    item_type: str | None = None
+    search: str | None = None
+    cloned_from_outfit_id: UUID | None = None
+
+
+class BulkDeleteOutfitsRequest(BaseModel):
+    # Explicit selection
+    outfit_ids: list[UUID] | None = None
+
+    # Select all with exceptions
+    select_all: bool = False
+    excluded_ids: list[UUID] | None = None
+    filters: BulkOutfitFilters | None = None
+
+    def model_post_init(self, __context):
+        if not self.select_all and not self.outfit_ids:
+            raise ValueError("Either outfit_ids or select_all=True must be provided")
+        if self.select_all and self.outfit_ids:
+            raise ValueError("Cannot use both outfit_ids and select_all")
+
+
+class BulkDeleteOutfitsResponse(BaseModel):
+    deleted: int
+    failed: int
+    errors: list[str] = Field(default_factory=list)
 
 
 class FeedbackRequest(BaseModel):
@@ -368,6 +410,10 @@ def outfit_to_response(
         source=outfit.source.value,
         reasoning=outfit.reasoning,
         style_notes=outfit.style_notes,
+        season=outfit.season,
+        formality=outfit.formality,
+        palette=outfit.palette,
+        notes=outfit.notes,
         highlights=highlights,
         weather=outfit.weather_data,
         items=items,
@@ -452,6 +498,74 @@ async def suggest_outfit(
     return outfit_to_response(outfit, wore_instead_map, is_starter_suggestion=is_starter)
 
 
+class SuggestionCreateRequest(OutfitAttributeFields):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[UUID] = Field(min_length=1, max_length=20)
+    occasion: str = Field(max_length=50)
+    name: Annotated[str | None, Field(max_length=100)] = None
+    scheduled_for: date | None = Field(
+        default=None, description="Defaults to the user's current date"
+    )
+    reasoning: Annotated[str | None, Field(max_length=MAX_AUTHORING_TEXT_LENGTH)] = None
+    style_notes: Annotated[str | None, Field(max_length=MAX_AUTHORING_TEXT_LENGTH)] = None
+
+    @field_validator("occasion")
+    @classmethod
+    def validate_occasion(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in VALID_OCCASIONS:
+            raise ValueError(
+                f"Invalid occasion '{v}'. Must be one of: {', '.join(sorted(VALID_OCCASIONS))}"
+            )
+        return v
+
+
+@router.post("/suggestions", response_model=OutfitResponse, status_code=status.HTTP_201_CREATED)
+async def create_external_suggestion(
+    request: SuggestionCreateRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> OutfitResponse:
+    """Persist an externally-authored suggestion; available regardless of the AI flags."""
+    await rate_limit_by_user(
+        str(current_user.id), "external_suggestion", max_requests=20, window_seconds=60
+    )
+
+    service = ExternalOutfitService(db)
+    try:
+        outfit = await service.create_suggestion(
+            user=current_user,
+            item_ids=request.items,
+            occasion=request.occasion,
+            name=request.name,
+            scheduled_for=request.scheduled_for,
+            reasoning=request.reasoning,
+            style_notes=request.style_notes,
+            season=request.season,
+            formality=request.formality,
+            palette=request.palette,
+            notes=request.notes,
+        )
+    except ItemOwnershipError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": "OUTFIT_ITEM_OWNERSHIP",
+                "message": "One or more items do not belong to you",
+            },
+        ) from None
+
+    await db.commit()
+    # No learning pass here, unlike the studio path: that one synthesizes accepted feedback, while
+    # an authored suggestion lands pending and unrated, so process_feedback would return early.
+    # Learning fires when the user actually accepts or rates it.
+    await clear_suggestions(current_user.id, request.occasion)
+
+    full = await service.get_full_outfit(outfit.id)
+    return outfit_to_response(full)
+
+
 @router.get("", response_model=OutfitListResponse)
 async def list_outfits(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -511,6 +625,67 @@ async def list_outfits(
         page_size=page_size,
         has_more=(page * page_size) < total,
     )
+
+
+@router.post("/bulk/delete", response_model=BulkDeleteOutfitsResponse)
+async def bulk_delete_outfits(
+    request: BulkDeleteOutfitsRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> BulkDeleteOutfitsResponse:
+    service = OutfitService(db)
+    deleted = 0
+    failed = 0
+    errors: list[str] = []
+
+    if request.select_all:
+        list_filters = OutfitListFilters(
+            user_id=current_user.id,
+            status_filter=request.filters.status_filter if request.filters else None,
+            occasion=request.filters.occasion if request.filters else None,
+            date_from=request.filters.date_from if request.filters else None,
+            date_to=request.filters.date_to if request.filters else None,
+            source=request.filters.source if request.filters else None,
+            is_lookbook=request.filters.is_lookbook if request.filters else None,
+            is_replacement=request.filters.is_replacement if request.filters else None,
+            has_source_item=request.filters.has_source_item if request.filters else None,
+            item_type=request.filters.item_type if request.filters else None,
+            search=request.filters.search if request.filters else None,
+            cloned_from_outfit_id=request.filters.cloned_from_outfit_id
+            if request.filters
+            else None,
+        )
+        outfit_ids = await service.get_ids_by_filter(
+            list_filters,
+            excluded_ids=list(request.excluded_ids) if request.excluded_ids else None,
+        )
+        logger.info(f"Bulk delete select_all: {len(outfit_ids)} outfits to delete")
+    else:
+        outfit_ids = request.outfit_ids or []
+
+    for outfit_id in outfit_ids:
+        try:
+            result = await db.execute(
+                select(Outfit).where(
+                    and_(Outfit.id == outfit_id, Outfit.user_id == current_user.id)
+                )
+            )
+            outfit = result.scalar_one_or_none()
+            if not outfit:
+                errors.append(f"Outfit {outfit_id} not found or not owned by user")
+                failed += 1
+                continue
+
+            await db.delete(outfit)
+            deleted += 1
+        except Exception as e:
+            logger.error(f"Failed to delete outfit {outfit_id}: {e}")
+            errors.append(f"Failed to delete outfit {outfit_id}")
+            failed += 1
+
+    await db.commit()
+
+    return BulkDeleteOutfitsResponse(deleted=deleted, failed=failed, errors=errors)
 
 
 @router.get("/{outfit_id}", response_model=OutfitResponse)
@@ -955,7 +1130,7 @@ def _check_studio_kill_switch() -> None:
         )
 
 
-class StudioCreateRequest(BaseModel):
+class StudioCreateRequest(OutfitAttributeFields):
     model_config = ConfigDict(extra="forbid")
 
     items: list[UUID] = Field(min_length=1, max_length=20)
@@ -1032,6 +1207,10 @@ async def create_studio_outfit(
             scheduled_for=request.scheduled_for,
             mark_worn=request.mark_worn,
             source_item_id=request.source_item_id,
+            season=request.season,
+            formality=request.formality,
+            palette=request.palette,
+            notes=request.notes,
         )
     except ItemOwnershipError:
         raise HTTPException(
