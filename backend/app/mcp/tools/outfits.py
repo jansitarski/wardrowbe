@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime
 from uuid import UUID
 
@@ -7,16 +8,23 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import selectinload
 
 from app.api.outfits import (
+    FeedbackRequest,
     OutfitListResponse,
+    feedback_to_response,
     fetch_wore_instead_items_map,
     outfit_to_response,
 )
 from app.models.outfit import FamilyOutfitRating, Outfit, OutfitItem, OutfitStatus
+from app.services.feedback_service import apply_outfit_feedback
+from app.services.learning_service import LearningService
 from app.services.outfit_service import OutfitListFilters, OutfitService
+from app.services.studio_service import ItemOwnershipError
 from app.services.suggestion_cache import clear_suggestions
 
-from ..runtime import ToolContext, tool_context
+from ..runtime import ToolContext, tool_context, validated
 from .items import clamp_page
+
+logger = logging.getLogger(__name__)
 
 
 async def load_owned_outfit(ctx: ToolContext, outfit_id: UUID) -> Outfit:
@@ -110,3 +118,42 @@ def register(mcp: MCPServer) -> None:
             await ctx.db.flush()
             await clear_suggestions(ctx.user.id, outfit.occasion)
             return await outfit_dump(ctx, outfit)
+
+    @mcp.tool()
+    async def submit_outfit_feedback(
+        outfit_id: UUID,
+        accepted: bool | None = None,
+        rating: int | None = None,
+        comfort_rating: int | None = None,
+        style_rating: int | None = None,
+        comment: str | None = None,
+        worn: bool | None = None,
+    ) -> dict:
+        """Record feedback on an outfit: accept/reject, ratings 1-5, comment;
+        worn=true also logs a wear for every item in the outfit."""
+        payload = {
+            k: v
+            for k, v in {
+                "accepted": accepted,
+                "rating": rating,
+                "comfort_rating": comfort_rating,
+                "style_rating": style_rating,
+                "comment": comment,
+                "worn": worn,
+            }.items()
+            if v is not None
+        }
+        request = validated(FeedbackRequest, payload)
+        async with tool_context() as ctx:
+            outfit = await load_owned_outfit(ctx, outfit_id)
+            try:
+                feedback = await apply_outfit_feedback(ctx.db, ctx.user, outfit, request)
+            except ItemOwnershipError:
+                raise ToolError("One or more items do not belong to you") from None
+            await ctx.db.flush()
+            await ctx.db.refresh(feedback)
+            try:
+                await LearningService(ctx.db).process_feedback(outfit.id, ctx.user.id)
+            except Exception:
+                logger.exception("Learning processing failed for outfit %s", outfit.id)
+            return feedback_to_response(feedback).model_dump(mode="json")

@@ -71,3 +71,40 @@ async def test_get_outfit_not_found(call_tool_raw, test_user):
     )
     assert result["isError"] is True
     assert "Outfit not found" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_submit_outfit_feedback(call_tool, db_session, test_user):
+    outfit = await _make_outfit(db_session, test_user)
+    result = await call_tool(
+        "submit_outfit_feedback",
+        {
+            "outfit_id": str(outfit.id),
+            "accepted": True,
+            "rating": 5,
+            "comment": "great",
+        },
+    )
+    assert result["accepted"] is True
+    assert result["rating"] == 5
+    status = await call_tool("get_outfit", {"outfit_id": str(outfit.id)})
+    assert status["status"] == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_submit_outfit_feedback_worn_bumps_wear(call_tool, db_session, test_user):
+    top = await _make_item(db_session, test_user, type="top")
+    bottom = await _make_item(db_session, test_user, type="bottom")
+    outfit = await _make_outfit(db_session, test_user, items=[top, bottom])
+    await call_tool("submit_outfit_feedback", {"outfit_id": str(outfit.id), "worn": True})
+    item = await call_tool("get_item", {"item_id": str(top.id)})
+    assert item["wear_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_submit_outfit_feedback_invalid_rating(call_tool_raw, db_session, test_user):
+    outfit = await _make_outfit(db_session, test_user)
+    result = await call_tool_raw(
+        "submit_outfit_feedback", {"outfit_id": str(outfit.id), "rating": 9}
+    )
+    assert result["isError"] is True
