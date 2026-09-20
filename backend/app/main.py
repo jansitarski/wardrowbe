@@ -12,9 +12,12 @@ from pydantic import ValidationError
 from app.api.router import api_router
 from app.config import get_settings
 from app.database import engine
+from app.mcp.server import build_mcp_asgi, build_mcp_server
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+mcp_server = build_mcp_server()
 
 
 @asynccontextmanager
@@ -23,7 +26,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if warning:
         logger.error("Configuration: %s", warning)
     logger.info("Auth mode: %s", settings.get_auth_mode())
-    yield
+    async with mcp_server.session_manager.run():
+        yield
     await engine.dispose()
 
 
@@ -50,6 +54,8 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=500)
 # Include API router
 app.include_router(api_router, prefix="/api/v1")
+# MCP mount is unconditional; MCPAuthMiddleware 404s when MCP_ENABLED is off
+app.mount("/mcp", build_mcp_asgi(mcp_server))
 
 
 # Global exception handlers
