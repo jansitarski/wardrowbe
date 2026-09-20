@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import subprocess
 
@@ -177,3 +178,85 @@ def sample_tags() -> dict[str, Any]:
         "season": ["spring", "fall", "all-season"],
         "confidence": 0.85,
     }
+
+
+@pytest_asyncio.fixture
+async def mcp_asgi_client(async_engine, monkeypatch) -> AsyncGenerator[AsyncClient, None]:
+    from app.config import Settings
+    from app.mcp import runtime
+    from app.mcp.server import build_mcp_asgi, build_mcp_server
+
+    factory = async_sessionmaker(
+        async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+    monkeypatch.setattr(runtime, "session_factory_override", factory)
+    monkeypatch.setattr("app.mcp.auth.get_settings", lambda: Settings(mcp_enabled=True))
+
+    server = build_mcp_server()
+    asgi = build_mcp_asgi(server)
+
+    # anyio cancel scopes must enter and exit in the same task, but pytest-asyncio
+    # runs fixture setup and teardown in different tasks — so the session manager
+    # lives in a dedicated task for the fixture's lifetime.
+    started = asyncio.Event()
+    stop = asyncio.Event()
+
+    async def _run_session_manager() -> None:
+        async with server.session_manager.run():
+            started.set()
+            await stop.wait()
+
+    runner = asyncio.create_task(_run_session_manager())
+    await started.wait()
+    try:
+        transport = ASGITransport(app=asgi)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+    finally:
+        stop.set()
+        await runner
+
+
+@pytest.fixture
+def mcp_call(mcp_asgi_client, auth_headers):
+    async def _call(method: str, params: dict | None = None, headers: dict | None = None):
+        return await mcp_asgi_client.post(
+            "/",
+            json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}},
+            headers={
+                "accept": "application/json, text/event-stream",
+                "mcp-protocol-version": "2025-06-18",
+                **auth_headers,
+                **(headers or {}),
+            },
+        )
+
+    return _call
+
+
+@pytest.fixture
+def call_tool(mcp_call):
+    async def _tool(name: str, arguments: dict | None = None) -> dict:
+        resp = await mcp_call("tools/call", {"name": name, "arguments": arguments or {}})
+        assert resp.status_code == 200, resp.text
+        result = resp.json()["result"]
+        assert not result.get("isError"), result
+        if "structuredContent" in result:
+            return result["structuredContent"]
+        return json.loads(result["content"][0]["text"])
+
+    return _tool
+
+
+@pytest.fixture
+def call_tool_raw(mcp_call):
+    async def _tool(name: str, arguments: dict | None = None) -> dict:
+        resp = await mcp_call("tools/call", {"name": name, "arguments": arguments or {}})
+        assert resp.status_code == 200, resp.text
+        return resp.json()["result"]
+
+    return _tool
