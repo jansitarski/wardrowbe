@@ -117,6 +117,12 @@ spec:
                   name: wardrobe-config
                   key: AI_TEXT_ENABLED
                   optional: true
+            - name: MCP_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: wardrobe-config
+                  key: MCP_ENABLED
+                  optional: true
             - name: LOG_LEVEL
               valueFrom:
                 configMapKeyRef:

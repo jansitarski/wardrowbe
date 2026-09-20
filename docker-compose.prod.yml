@@ -60,6 +60,7 @@ services:
       AI_VISION_ENABLED: ${AI_VISION_ENABLED:-}
       AI_TEXT_ENABLED: ${AI_TEXT_ENABLED:-}
       AI_REASONING_EFFORT: ${AI_REASONING_EFFORT:-none}
+      MCP_ENABLED: ${MCP_ENABLED:-false}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       # OIDC (set these if using OIDC instead of forward auth)
