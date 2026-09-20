@@ -4,9 +4,21 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_mcp_mount_404_when_disabled(client, auth_headers):
-    resp = await client.post("/mcp/", json={}, headers=auth_headers)
+@pytest.mark.parametrize("path", ["/mcp", "/mcp/"])
+async def test_mcp_mount_404_when_disabled(client, auth_headers, path):
+    resp = await client.post(path, json={}, headers=auth_headers)
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/mcp", "/mcp/"])
+async def test_mcp_mount_401_when_enabled_without_valid_token(client, monkeypatch, path):
+    from app.config import Settings
+
+    monkeypatch.setattr("app.mcp.auth.get_settings", lambda: Settings(mcp_enabled=True))
+    resp = await client.post(path, json={})
+    assert resp.status_code == 401
+    assert resp.headers["www-authenticate"] == "Bearer"
 
 
 @pytest.mark.asyncio
