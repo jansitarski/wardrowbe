@@ -7,8 +7,31 @@ from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import attributes, selectinload
 
-from app.models.item import ClothingItem, ItemHistory, ItemStatus, TaggingStatus, WashHistory
+from app.models.item import (
+    ClothingItem,
+    ItemHistory,
+    ItemStatus,
+    TaggedBy,
+    TaggingStatus,
+    WashHistory,
+)
 from app.schemas.item import DEFAULT_WASH_INTERVALS, ItemCreate, ItemFilter, ItemUpdate
+
+TAG_WRITEBACK_FIELDS = {"type", "subtype", "colors", "primary_color", "tags"}
+_EMPTY_TAG_VALUES = (None, "", [], {})
+
+
+def has_tag_content(field: str, value: object) -> bool:
+    if field == "tags" and isinstance(value, dict):
+        return any(v not in _EMPTY_TAG_VALUES for v in value.values())
+    return value not in _EMPTY_TAG_VALUES
+
+
+def stamp_manual_tag_writeback(item: ClothingItem, update_data: dict) -> None:
+    if any(has_tag_content(f, update_data.get(f)) for f in TAG_WRITEBACK_FIELDS):
+        item.tagging_status = TaggingStatus.tagged
+        item.tagged_by = TaggedBy.manual
+        item.tagged_at = datetime.now(UTC)
 
 
 class ItemService:
