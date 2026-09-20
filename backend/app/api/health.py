@@ -36,6 +36,7 @@ async def capabilities() -> dict[str, Any]:
             "external_tagging": True,
             "external_suggestions": True,
             "external_pairings": True,
+            "builtin_mcp": settings.mcp_enabled,
         },
         "version": "1.0.0",
     }

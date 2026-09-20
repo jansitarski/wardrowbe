@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     ai_vision_enabled: bool | None = Field(default=None)
     ai_text_enabled: bool | None = Field(default=None)
 
+    # Built-in MCP server (off by default)
+    mcp_enabled: bool = Field(default=False)
+
     # AI Service (OpenAI-compatible API - supports Ollama, OpenAI, etc.)
     ai_base_url: str = Field(default="")
     ai_api_key: str | None = Field(default=None)
