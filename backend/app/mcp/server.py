@@ -2,7 +2,7 @@ from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
 from .auth import MCPAuthMiddleware
-from .tools import misc
+from .tools import items, misc
 
 SERVER_NAME = "wardrowbe"
 SERVER_INSTRUCTIONS = (
@@ -10,7 +10,7 @@ SERVER_INSTRUCTIONS = (
     "browse and tag items, log wear and wash, review and author outfits."
 )
 
-_TOOL_MODULES = (misc,)
+_TOOL_MODULES = (misc, items)
 
 
 def build_mcp_server() -> MCPServer:
