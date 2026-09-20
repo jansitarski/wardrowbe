@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from app.api.router import api_router
 from app.config import get_settings
 from app.database import engine
-from app.mcp.server import build_mcp_asgi, build_mcp_server
+from app.mcp.server import MCPDispatchMiddleware, build_mcp_asgi, build_mcp_server
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -52,10 +52,10 @@ app.add_middleware(
 
 # Enable GZip compression for responses > 500 bytes
 app.add_middleware(GZipMiddleware, minimum_size=500)
+# Dispatched unconditionally; MCPAuthMiddleware 404s when MCP_ENABLED is off
+app.add_middleware(MCPDispatchMiddleware, mcp_app=build_mcp_asgi(mcp_server))
 # Include API router
 app.include_router(api_router, prefix="/api/v1")
-# MCP mount is unconditional; MCPAuthMiddleware 404s when MCP_ENABLED is off
-app.mount("/mcp", build_mcp_asgi(mcp_server))
 
 
 # Global exception handlers
