@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.models.item import ClothingItem, ItemStatus, TaggedBy, TaggingStatus
+from app.models.item import ClothingItem, ItemStatus, TaggingStatus
 from app.models.user import User
 from app.schemas.item import (
     AnalysisCompletion,
@@ -48,7 +48,7 @@ from app.schemas.item import (
     WashHistoryResponse,
 )
 from app.services.image_service import ImageService
-from app.services.item_service import ItemService
+from app.services.item_service import ItemService, stamp_manual_tag_writeback
 from app.utils.auth import get_current_user
 from app.utils.signed_urls import sign_image_url
 from app.workers.queues import IMAGE_QUEUE, TAGGING_QUEUE, queue_for_kind
@@ -60,15 +60,6 @@ settings = get_settings()
 router = APIRouter(prefix="/items", tags=["Items"])
 
 RECENT_ANALYSIS_LIMIT = 10
-
-TAG_WRITEBACK_FIELDS = {"type", "subtype", "colors", "primary_color", "tags"}
-_EMPTY_TAG_VALUES = (None, "", [], {})
-
-
-def _has_tag_content(field: str, value: Any) -> bool:
-    if field == "tags" and isinstance(value, dict):
-        return any(v not in _EMPTY_TAG_VALUES for v in value.values())
-    return value not in _EMPTY_TAG_VALUES
 
 
 async def _resolve_bulk_item_ids(
@@ -1249,10 +1240,7 @@ async def update_item(
         )
 
     update_data = item_data.model_dump(exclude_unset=True)
-    if any(_has_tag_content(f, update_data.get(f)) for f in TAG_WRITEBACK_FIELDS):
-        item.tagging_status = TaggingStatus.tagged
-        item.tagged_by = TaggedBy.manual
-        item.tagged_at = datetime.now(UTC)
+    stamp_manual_tag_writeback(item, update_data)
 
     item = await item_service.update(item, item_data)
     return ItemResponse.model_validate(item)
