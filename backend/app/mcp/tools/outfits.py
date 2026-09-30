@@ -60,9 +60,10 @@ def register(mcp: MCPServer) -> None:
         date_from: date | None = None,
         date_to: date | None = None,
     ) -> dict:
-        """List the user's outfits, newest first. Filter by status
-        (pending/accepted/rejected/skipped/...), occasion, source
-        (scheduled/on_demand/manual/pairing/external), or scheduled date range."""
+        """List the user's outfits, newest first by creation. Filter by status
+        (pending/sent/viewed/accepted/rejected/skipped/expired), occasion, source
+        (scheduled/on_demand/manual/pairing/external), or scheduled date range.
+        status and source accept several comma-separated values."""
         page, page_size = clamp_page(page, page_size)
         async with tool_context() as ctx:
             filters = OutfitListFilters(
