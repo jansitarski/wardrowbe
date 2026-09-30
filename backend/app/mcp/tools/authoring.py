@@ -1,11 +1,13 @@
 import logging
 from datetime import date
+from typing import Literal
 from uuid import UUID
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from app.api.outfits import (
+    VALID_OCCASIONS,
     StudioCreateRequest,
     SuggestionCreateRequest,
     outfit_to_response,
@@ -23,12 +25,14 @@ from ..runtime import tool_context, validated
 
 logger = logging.getLogger(__name__)
 
+Occasion = Literal[tuple(sorted(VALID_OCCASIONS))]  # type: ignore[valid-type]
+
 
 def register(mcp: MCPServer) -> None:
     @mcp.tool()
     async def create_outfit_suggestion(
         items: list[UUID],
-        occasion: str,
+        occasion: Occasion,
         name: str | None = None,
         scheduled_for: date | None = None,
         reasoning: str | None = None,
@@ -140,7 +144,7 @@ def register(mcp: MCPServer) -> None:
     @mcp.tool()
     async def create_outfit(
         items: list[UUID],
-        occasion: str,
+        occasion: Occasion,
         name: str | None = None,
         scheduled_for: date | None = None,
         mark_worn: bool = False,

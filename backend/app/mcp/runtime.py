@@ -2,7 +2,7 @@
 
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from fastapi import HTTPException
 from mcp.server.mcpserver.exceptions import ToolError
@@ -42,6 +42,11 @@ def validated(model_cls: type[ModelT], payload: dict) -> ModelT:
         return model_cls.model_validate(payload)
     except ValidationError as exc:
         raise ToolError(str(exc)) from exc
+
+
+def present(**fields: Any) -> dict[str, Any]:
+    """Keyword arguments that were actually given, for building a request payload."""
+    return {k: v for k, v in fields.items() if v is not None}
 
 
 def _detail_message(exc: HTTPException) -> str:

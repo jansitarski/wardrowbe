@@ -8,7 +8,7 @@ from app.schemas.item import ItemUpdate
 from app.services.ai_service import VALID_TYPES
 from app.services.item_service import ItemService, stamp_manual_tag_writeback
 
-from ..runtime import tool_context, validated
+from ..runtime import present, tool_context, validated
 from .items import get_owned_item, item_dump
 
 # Derived from the same vocabulary the vision prompt uses, so the MCP schema
@@ -24,10 +24,6 @@ async def _apply_update(item_id: UUID, payload: dict[str, Any]) -> dict:
         stamp_manual_tag_writeback(item, update_data)
         item = await ItemService(ctx.db).update(item, update)
         return item_dump(item)
-
-
-def _present(**fields: Any) -> dict[str, Any]:
-    return {k: v for k, v in fields.items() if v is not None}
 
 
 def register(mcp: MCPServer) -> None:
@@ -49,7 +45,7 @@ def register(mcp: MCPServer) -> None:
         replaced as a whole; non-empty content marks the item tagged (tagged_by=manual).
         type is limited to the vision vocabulary listed in the schema; the web UI
         offers one type outside it (suit) that must be set there."""
-        tags = _present(
+        tags = present(
             colors=colors,
             primary_color=primary_color,
             pattern=pattern,
@@ -59,7 +55,7 @@ def register(mcp: MCPServer) -> None:
             formality=formality,
             fit=fit,
         )
-        payload = _present(type=type, subtype=subtype)
+        payload = present(type=type, subtype=subtype)
         if tags:
             payload["tags"] = tags
         if not payload:
@@ -76,7 +72,7 @@ def register(mcp: MCPServer) -> None:
         wash_interval: int | None = None,
     ) -> dict:
         """Update non-tag item fields (name, brand, notes, favorite, wash_interval)."""
-        payload = _present(
+        payload = present(
             name=name, brand=brand, notes=notes, favorite=favorite, wash_interval=wash_interval
         )
         if not payload:

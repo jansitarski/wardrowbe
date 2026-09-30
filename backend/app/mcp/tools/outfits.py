@@ -22,7 +22,7 @@ from app.services.outfit_service import OutfitListFilters, OutfitService
 from app.services.studio_service import ItemOwnershipError
 from app.services.suggestion_cache import clear_suggestions
 
-from ..runtime import READ_ONLY, ToolContext, tool_context, validated
+from ..runtime import READ_ONLY, ToolContext, present, tool_context, validated
 from .items import clamp_page
 
 logger = logging.getLogger(__name__)
@@ -119,18 +119,14 @@ def register(mcp: MCPServer) -> None:
     ) -> dict:
         """Record feedback on an outfit: accept/reject, ratings 1-5, comment;
         worn=true also logs a wear for every item in the outfit."""
-        payload = {
-            k: v
-            for k, v in {
-                "accepted": accepted,
-                "rating": rating,
-                "comfort_rating": comfort_rating,
-                "style_rating": style_rating,
-                "comment": comment,
-                "worn": worn,
-            }.items()
-            if v is not None
-        }
+        payload = present(
+            accepted=accepted,
+            rating=rating,
+            comfort_rating=comfort_rating,
+            style_rating=style_rating,
+            comment=comment,
+            worn=worn,
+        )
         request = validated(FeedbackRequest, payload)
         async with tool_context() as ctx:
             outfit = await load_owned_outfit(ctx, outfit_id)

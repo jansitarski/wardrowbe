@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.api.outfits import VALID_OCCASIONS
 from app.config import Settings
 
 from .test_mcp_items import _make_item
@@ -36,7 +37,7 @@ async def test_create_outfit_suggestion_invalid_occasion(call_tool_raw, db_sessi
         {"items": [str(top.id)], "occasion": "space-opera"},
     )
     assert result["isError"] is True
-    assert "Invalid occasion" in result["content"][0]["text"]
+    assert "space-opera" in result["content"][0]["text"]
 
 
 @pytest.mark.asyncio
@@ -104,3 +105,13 @@ async def test_create_outfit_respects_studio_kill_switch(
     result = await call_tool_raw("create_outfit", {"items": [str(top.id)], "occasion": "casual"})
     assert result["isError"] is True
     assert "studio" in result["content"][0]["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_authoring_schemas_enumerate_occasions(mcp_call):
+    resp = await mcp_call("tools/list")
+    assert resp.status_code == 200, resp.text
+    tools = {t["name"]: t for t in resp.json()["result"]["tools"]}
+    for name in ("create_outfit_suggestion", "create_outfit"):
+        enum = tools[name]["inputSchema"]["properties"]["occasion"]["enum"]
+        assert set(enum) == VALID_OCCASIONS, name
