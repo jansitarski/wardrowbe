@@ -3,6 +3,7 @@
 import pytest
 
 from app.services.external_outfit_service import ExternalOutfitService
+from app.services.suggestion_cache import has_cached, push_suggestions
 
 from .test_mcp_items import _make_item
 
@@ -44,25 +45,32 @@ async def test_get_outfit(call_tool, db_session, test_user):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("response", ["accepted", "rejected", "skipped"])
-async def test_respond_to_outfit_sets_status(call_tool, db_session, test_user, response):
+@pytest.mark.parametrize(
+    ("response", "cache_kept"),
+    [("accepted", True), ("rejected", False), ("skipped", False)],
+)
+async def test_respond_to_outfit_sets_status(
+    call_tool, db_session, test_user, response, cache_kept
+):
     outfit = await _make_outfit(db_session, test_user)
+    await push_suggestions(test_user.id, outfit.occasion, [{"items": [1], "headline": "cached"}])
     result = await call_tool(
         "respond_to_outfit", {"outfit_id": str(outfit.id), "response": response}
     )
     assert result["status"] == response
     await db_session.refresh(outfit)
     assert outfit.responded_at is not None
+    assert await has_cached(test_user.id, outfit.occasion) is cache_kept
 
 
 @pytest.mark.asyncio
-async def test_respond_to_outfit_rejects_unknown_response(call_tool_raw, db_session, test_user):
-    outfit = await _make_outfit(db_session, test_user)
+async def test_respond_to_outfit_rejects_unknown_response(call_tool_raw, test_user):
     result = await call_tool_raw(
-        "respond_to_outfit", {"outfit_id": str(outfit.id), "response": "maybe"}
+        "respond_to_outfit",
+        {"outfit_id": "00000000-0000-0000-0000-000000000000", "response": "maybe"},
     )
     assert result["isError"] is True
-    assert "response" in result["content"][0]["text"]
+    assert "skipped" in result["content"][0]["text"]
 
 
 @pytest.mark.asyncio

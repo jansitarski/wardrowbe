@@ -93,13 +93,15 @@ def register(mcp: MCPServer) -> None:
     async def respond_to_outfit(
         outfit_id: UUID, response: Literal["accepted", "rejected", "skipped"]
     ) -> dict:
-        """Answer an outfit suggestion. rejected and skipped also clear the cached
-        suggestions for the outfit's occasion so the next request is fresh."""
+        """Record the user's answer to an outfit suggestion: accepted (they will
+        wear it), rejected (they dislike it; trains future suggestions away from
+        it), or skipped (not today; no preference recorded). rejected and skipped
+        also discard the cached suggestions for that occasion."""
         async with tool_context() as ctx:
             outfit = await OutfitService(ctx.db).set_status(
                 outfit_id, ctx.user.id, OutfitStatus(response)
             )
-            if response != "accepted":
+            if response in ("rejected", "skipped"):
                 await clear_suggestions(ctx.user.id, outfit.occasion)
             return await outfit_dump(ctx, outfit)
 
