@@ -59,6 +59,15 @@ async def test_list_items_tagging_status_filter(call_tool, db_session, test_user
 
 
 @pytest.mark.asyncio
+async def test_list_items_needs_wash_filter(call_tool, db_session, test_user):
+    await _make_item(db_session, test_user, needs_wash=True)
+    await _make_item(db_session, test_user)
+    result = await call_tool("list_items", {"needs_wash": True})
+    assert result["total"] == 1
+    assert result["items"][0]["needs_wash"] is True
+
+
+@pytest.mark.asyncio
 async def test_list_items_clamps_page_size(call_tool, db_session, test_user):
     await _make_item(db_session, test_user)
     result = await call_tool("list_items", {"page_size": 5000})
@@ -101,3 +110,11 @@ async def test_get_item_image_invalid_variant(call_tool_raw, db_session, test_us
     result = await call_tool_raw("get_item_image", {"item_id": str(item.id), "variant": "huge"})
     assert result["isError"] is True
     assert "variant" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_get_item_image_schema_enumerates_variants(mcp_call):
+    resp = await mcp_call("tools/list")
+    tools = {t["name"]: t for t in resp.json()["result"]["tools"]}
+    variant = tools["get_item_image"]["inputSchema"]["properties"]["variant"]
+    assert variant["enum"] == ["thumbnail", "medium", "full"]

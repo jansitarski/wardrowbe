@@ -1,5 +1,6 @@
 import base64
 import mimetypes
+from typing import Literal
 from uuid import UUID
 
 from mcp.server import MCPServer
@@ -14,7 +15,7 @@ from app.services.item_service import ItemService
 from ..runtime import ToolContext, tool_context
 
 MAX_PAGE_SIZE = 100
-IMAGE_VARIANTS = ("thumbnail", "medium", "full")
+ImageVariant = Literal["thumbnail", "medium", "full"]
 
 
 def clamp_page(page: int, page_size: int) -> tuple[int, int]:
@@ -56,7 +57,8 @@ def register(mcp: MCPServer) -> None:
         search: str | None = None,
     ) -> dict:
         """List the user's clothing items with filters. tagging_status='pending'
-        is the external-tagging work queue."""
+        is the external-tagging work queue; needs_wash=true is the wash queue
+        (wears since last wash reached the item's wash interval)."""
         page, page_size = clamp_page(page, page_size)
         filters = ItemFilter(
             type=type,
@@ -80,10 +82,8 @@ def register(mcp: MCPServer) -> None:
             return item_dump(await get_owned_item(ctx, item_id))
 
     @mcp.tool()
-    async def get_item_image(item_id: UUID, variant: str = "medium") -> ImageContent:
-        """Return the item's photo. variant: thumbnail | medium | full."""
-        if variant not in IMAGE_VARIANTS:
-            raise ToolError(f"variant must be one of: {', '.join(IMAGE_VARIANTS)}")
+    async def get_item_image(item_id: UUID, variant: ImageVariant = "medium") -> ImageContent:
+        """Return the item's photo."""
         async with tool_context() as ctx:
             item = await get_owned_item(ctx, item_id)
             relative = {
