@@ -1,14 +1,19 @@
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from app.schemas.item import ItemUpdate
+from app.services.ai_service import VALID_TYPES
 from app.services.item_service import ItemService, stamp_manual_tag_writeback
 
 from ..runtime import tool_context, validated
 from .items import get_owned_item, item_dump
+
+# Derived from the same vocabulary the vision prompt uses, so the MCP schema
+# lists every accepted type and the SDK rejects anything else before the handler.
+ItemType = Literal[tuple(sorted(VALID_TYPES))]  # type: ignore[valid-type]
 
 
 async def _apply_update(item_id: UUID, payload: dict[str, Any]) -> dict:
@@ -21,11 +26,15 @@ async def _apply_update(item_id: UUID, payload: dict[str, Any]) -> dict:
         return item_dump(item)
 
 
+def _present(**fields: Any) -> dict[str, Any]:
+    return {k: v for k, v in fields.items() if v is not None}
+
+
 def register(mcp: MCPServer) -> None:
     @mcp.tool()
     async def set_item_tags(
         item_id: UUID,
-        type: str | None = None,
+        type: ItemType | None = None,
         subtype: str | None = None,
         colors: list[str] | None = None,
         primary_color: str | None = None,
@@ -37,29 +46,20 @@ def register(mcp: MCPServer) -> None:
         fit: str | None = None,
     ) -> dict:
         """Write tags back to an item (external tagging). The tags payload is
-        replaced; non-empty content marks the item tagged (tagged_by=manual)."""
-        tag_fields = {
-            "colors": colors,
-            "primary_color": primary_color,
-            "pattern": pattern,
-            "material": material,
-            "style": style,
-            "season": season,
-            "formality": formality,
-            "fit": fit,
-        }
-        payload: dict[str, Any] = {
-            k: v
-            for k, v in {
-                "type": type,
-                "subtype": subtype,
-                "colors": colors,
-                "primary_color": primary_color,
-            }.items()
-            if v is not None
-        }
-        if any(v is not None for v in tag_fields.values()):
-            payload["tags"] = {k: v for k, v in tag_fields.items() if v is not None}
+        replaced as a whole; non-empty content marks the item tagged (tagged_by=manual)."""
+        tags = _present(
+            colors=colors,
+            primary_color=primary_color,
+            pattern=pattern,
+            material=material,
+            style=style,
+            season=season,
+            formality=formality,
+            fit=fit,
+        )
+        payload = _present(type=type, subtype=subtype, colors=colors, primary_color=primary_color)
+        if tags:
+            payload["tags"] = tags
         if not payload:
             raise ToolError("Provide at least one tag field")
         return await _apply_update(item_id, payload)
@@ -74,17 +74,9 @@ def register(mcp: MCPServer) -> None:
         wash_interval: int | None = None,
     ) -> dict:
         """Update non-tag item fields (name, brand, notes, favorite, wash_interval)."""
-        payload = {
-            k: v
-            for k, v in {
-                "name": name,
-                "brand": brand,
-                "notes": notes,
-                "favorite": favorite,
-                "wash_interval": wash_interval,
-            }.items()
-            if v is not None
-        }
+        payload = _present(
+            name=name, brand=brand, notes=notes, favorite=favorite, wash_interval=wash_interval
+        )
         if not payload:
             raise ToolError("Provide at least one field to update")
         return await _apply_update(item_id, payload)

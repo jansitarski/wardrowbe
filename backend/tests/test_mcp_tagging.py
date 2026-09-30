@@ -56,3 +56,22 @@ async def test_update_item_requires_fields(call_tool_raw, db_session, test_user)
     item = await _make_item(db_session, test_user)
     result = await call_tool_raw("update_item", {"item_id": str(item.id)})
     assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_set_item_tags_rejects_unsupported_type(call_tool_raw, db_session, test_user):
+    item = await _make_item(db_session, test_user)
+    result = await call_tool_raw("set_item_tags", {"item_id": str(item.id), "type": "tights"})
+    assert result["isError"] is True
+    assert "tights" in result["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_set_item_tags_schema_enumerates_types(mcp_call):
+    resp = await mcp_call("tools/list")
+    assert resp.status_code == 200, resp.text
+    tools = {t["name"]: t for t in resp.json()["result"]["tools"]}
+    type_schema = tools["set_item_tags"]["inputSchema"]["properties"]["type"]
+    enum = next(opt["enum"] for opt in type_schema["anyOf"] if "enum" in opt)
+    assert "jeans" in enum
+    assert "tights" not in enum
