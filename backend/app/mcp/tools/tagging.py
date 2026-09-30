@@ -47,7 +47,8 @@ def register(mcp: MCPServer) -> None:
     ) -> dict:
         """Write tags back to an item (external tagging). The tags payload is
         replaced as a whole; non-empty content marks the item tagged (tagged_by=manual).
-        type is limited to the vision vocabulary; other types can only be set in the web UI."""
+        type is limited to the vision vocabulary listed in the schema; the web UI
+        offers one type outside it (suit) that must be set there."""
         tags = _present(
             colors=colors,
             primary_color=primary_color,
