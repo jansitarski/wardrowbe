@@ -149,7 +149,9 @@ def register(mcp: MCPServer) -> None:
         palette: list[str] | None = None,
         notes: str | None = None,
     ) -> dict:
-        """Compose a manual outfit in the studio (source=manual, counts as accepted)."""
+        """Compose a manual outfit in the studio (source=manual; stored pending but
+        fed to learning as accepted). Items are stored in canonical slot order.
+        mark_worn=true logs a wear for every item on scheduled_for, so pass both."""
         if get_settings().studio_disabled:
             raise ToolError("Outfit studio is disabled on this server")
         request = validated(
