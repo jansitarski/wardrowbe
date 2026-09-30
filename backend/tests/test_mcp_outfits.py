@@ -1,4 +1,4 @@
-"""MCP outfit tools: recent list, get, accept/reject/skip."""
+"""MCP outfit tools: list, get, respond_to_outfit, submit_outfit_feedback."""
 
 import pytest
 
@@ -44,24 +44,35 @@ async def test_get_outfit(call_tool, db_session, test_user):
 
 
 @pytest.mark.asyncio
-async def test_accept_outfit(call_tool, db_session, test_user):
+@pytest.mark.parametrize("response", ["accepted", "rejected", "skipped"])
+async def test_respond_to_outfit_sets_status(call_tool, db_session, test_user, response):
     outfit = await _make_outfit(db_session, test_user)
-    result = await call_tool("accept_outfit", {"outfit_id": str(outfit.id)})
-    assert result["status"] == "accepted"
+    result = await call_tool(
+        "respond_to_outfit", {"outfit_id": str(outfit.id), "response": response}
+    )
+    assert result["status"] == response
+    await db_session.refresh(outfit)
+    assert outfit.responded_at is not None
 
 
 @pytest.mark.asyncio
-async def test_reject_outfit(call_tool, db_session, test_user):
+async def test_respond_to_outfit_rejects_unknown_response(call_tool_raw, db_session, test_user):
     outfit = await _make_outfit(db_session, test_user)
-    result = await call_tool("reject_outfit", {"outfit_id": str(outfit.id)})
-    assert result["status"] == "rejected"
+    result = await call_tool_raw(
+        "respond_to_outfit", {"outfit_id": str(outfit.id), "response": "maybe"}
+    )
+    assert result["isError"] is True
+    assert "response" in result["content"][0]["text"]
 
 
 @pytest.mark.asyncio
-async def test_skip_outfit(call_tool, db_session, test_user):
-    outfit = await _make_outfit(db_session, test_user)
-    result = await call_tool("skip_outfit", {"outfit_id": str(outfit.id)})
-    assert result["status"] == "skipped"
+async def test_respond_to_outfit_not_found(call_tool_raw, test_user):
+    result = await call_tool_raw(
+        "respond_to_outfit",
+        {"outfit_id": "00000000-0000-0000-0000-000000000000", "response": "accepted"},
+    )
+    assert result["isError"] is True
+    assert "Outfit not found" in result["content"][0]["text"]
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 import logging
-from datetime import date, datetime
+from datetime import date
+from typing import Literal
 from uuid import UUID
 
 from mcp.server import MCPServer
@@ -89,34 +90,17 @@ def register(mcp: MCPServer) -> None:
             return await outfit_dump(ctx, outfit)
 
     @mcp.tool()
-    async def accept_outfit(outfit_id: UUID) -> dict:
-        """Accept a pending outfit suggestion."""
+    async def respond_to_outfit(
+        outfit_id: UUID, response: Literal["accepted", "rejected", "skipped"]
+    ) -> dict:
+        """Answer an outfit suggestion. rejected and skipped also clear the cached
+        suggestions for the outfit's occasion so the next request is fresh."""
         async with tool_context() as ctx:
-            outfit = await load_owned_outfit(ctx, outfit_id)
-            outfit.status = OutfitStatus.accepted
-            outfit.responded_at = datetime.utcnow()
-            await ctx.db.flush()
-            return await outfit_dump(ctx, outfit)
-
-    @mcp.tool()
-    async def reject_outfit(outfit_id: UUID) -> dict:
-        """Reject (dismiss) an outfit suggestion; clears cached suggestions for its occasion."""
-        async with tool_context() as ctx:
-            outfit = await load_owned_outfit(ctx, outfit_id)
-            outfit.status = OutfitStatus.rejected
-            outfit.responded_at = datetime.utcnow()
-            await ctx.db.flush()
-            await clear_suggestions(ctx.user.id, outfit.occasion)
-            return await outfit_dump(ctx, outfit)
-
-    @mcp.tool()
-    async def skip_outfit(outfit_id: UUID) -> dict:
-        """Skip an outfit suggestion; clears cached suggestions for its occasion."""
-        async with tool_context() as ctx:
-            outfit = await load_owned_outfit(ctx, outfit_id)
-            outfit.status = OutfitStatus.skipped
-            await ctx.db.flush()
-            await clear_suggestions(ctx.user.id, outfit.occasion)
+            outfit = await OutfitService(ctx.db).set_status(
+                outfit_id, ctx.user.id, OutfitStatus(response)
+            )
+            if response != "accepted":
+                await clear_suggestions(ctx.user.id, outfit.occasion)
             return await outfit_dump(ctx, outfit)
 
     @mcp.tool()
