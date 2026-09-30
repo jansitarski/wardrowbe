@@ -178,7 +178,7 @@ def register(mcp: MCPServer) -> None:
                     name=request.name,
                     scheduled_for=request.scheduled_for,
                     mark_worn=request.mark_worn,
-                    source_item_id=request.source_item_id,
+                    source_item_id=None,
                     season=request.season,
                     formality=request.formality,
                     palette=request.palette,
