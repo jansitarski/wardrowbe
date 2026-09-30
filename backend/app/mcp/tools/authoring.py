@@ -42,8 +42,10 @@ def register(mcp: MCPServer) -> None:
         palette: list[str] | None = None,
         notes: str | None = None,
     ) -> dict:
-        """Author an outfit suggestion (source=external, status=pending).
-        Item order defines display positions."""
+        """Author an outfit suggestion (source=external, status=pending). Item
+        order defines display positions. scheduled_for defaults to the user's
+        current date. palette lists dominant colors, most prominent first;
+        season and formality use the item tag vocabulary."""
         request = validated(
             SuggestionCreateRequest,
             {
@@ -98,7 +100,8 @@ def register(mcp: MCPServer) -> None:
         notes: str | None = None,
     ) -> dict:
         """Author a pairing for a source item (partners in items). The source
-        item is prepended automatically when absent from items."""
+        item is prepended automatically when absent from items. Attributes and
+        the scheduled_for default are as in create_outfit_suggestion."""
         request = validated(
             PairingCreateRequest,
             {
@@ -155,7 +158,8 @@ def register(mcp: MCPServer) -> None:
     ) -> dict:
         """Compose a manual outfit in the studio (source=manual; stored pending but
         fed to learning as accepted). Items are stored in canonical slot order.
-        mark_worn=true logs a wear for every item on scheduled_for, so pass both."""
+        mark_worn=true logs a wear for every item on scheduled_for, so pass both.
+        Attributes are as in create_outfit_suggestion."""
         if get_settings().studio_disabled:
             raise ToolError("Outfit studio is disabled on this server")
         request = validated(

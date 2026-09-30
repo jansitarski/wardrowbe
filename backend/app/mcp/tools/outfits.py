@@ -98,7 +98,8 @@ def register(mcp: MCPServer) -> None:
         """Record the user's answer to an outfit suggestion: accepted (they will
         wear it), rejected (they dislike it; trains future suggestions away from
         it), or skipped (not today; no preference recorded). rejected and skipped
-        also discard the cached suggestions for that occasion."""
+        also discard the cached suggestions for that occasion. For ratings or a
+        comment use submit_outfit_feedback."""
         async with tool_context() as ctx:
             outfit = await OutfitService(ctx.db).set_status(
                 outfit_id, ctx.user.id, OutfitStatus(response)
@@ -117,8 +118,10 @@ def register(mcp: MCPServer) -> None:
         comment: str | None = None,
         worn: bool | None = None,
     ) -> dict:
-        """Record feedback on an outfit: accept/reject, ratings 1-5, comment;
-        worn=true also logs a wear for every item in the outfit."""
+        """Record feedback on an outfit: ratings 1-5, a comment, and worn=true
+        (logs a wear for every item). accepted=true/false also sets the status,
+        like respond_to_outfit but without clearing cached suggestions; for a
+        plain yes/no answer prefer respond_to_outfit."""
         payload = present(
             accepted=accepted,
             rating=rating,

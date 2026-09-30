@@ -58,7 +58,8 @@ def register(mcp: MCPServer) -> None:
         """List the user's clothing items with filters. tagging_status='pending'
         is the external-tagging work queue; needs_wash=true is the wash queue
         (wears since last wash reached the item's wash interval, or the default
-        for its type)."""
+        for its type). type matches any stored type, including ones outside the
+        tagging vocabulary."""
         page, page_size = clamp_page(page, page_size)
         filters = ItemFilter(
             type=type,
