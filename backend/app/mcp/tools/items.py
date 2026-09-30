@@ -15,7 +15,6 @@ from app.services.item_service import ItemService
 from ..runtime import ToolContext, tool_context
 
 MAX_PAGE_SIZE = 100
-ImageVariant = Literal["thumbnail", "medium", "full"]
 
 
 def clamp_page(page: int, page_size: int) -> tuple[int, int]:
@@ -58,7 +57,8 @@ def register(mcp: MCPServer) -> None:
     ) -> dict:
         """List the user's clothing items with filters. tagging_status='pending'
         is the external-tagging work queue; needs_wash=true is the wash queue
-        (wears since last wash reached the item's wash interval)."""
+        (wears since last wash reached the item's wash interval, or the default
+        for its type)."""
         page, page_size = clamp_page(page, page_size)
         filters = ItemFilter(
             type=type,
@@ -82,8 +82,10 @@ def register(mcp: MCPServer) -> None:
             return item_dump(await get_owned_item(ctx, item_id))
 
     @mcp.tool()
-    async def get_item_image(item_id: UUID, variant: ImageVariant = "medium") -> ImageContent:
-        """Return the item's photo."""
+    async def get_item_image(
+        item_id: UUID, variant: Literal["thumbnail", "medium", "full"] = "medium"
+    ) -> ImageContent:
+        """Return the item's photo. thumbnail=400px, medium=800px, full=original upload."""
         async with tool_context() as ctx:
             item = await get_owned_item(ctx, item_id)
             relative = {

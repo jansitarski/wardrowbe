@@ -115,6 +115,7 @@ async def test_get_item_image_invalid_variant(call_tool_raw, db_session, test_us
 @pytest.mark.asyncio
 async def test_get_item_image_schema_enumerates_variants(mcp_call):
     resp = await mcp_call("tools/list")
+    assert resp.status_code == 200, resp.text
     tools = {t["name"]: t for t in resp.json()["result"]["tools"]}
     variant = tools["get_item_image"]["inputSchema"]["properties"]["variant"]
     assert variant["enum"] == ["thumbnail", "medium", "full"]
