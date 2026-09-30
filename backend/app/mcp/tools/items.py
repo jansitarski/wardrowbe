@@ -85,7 +85,7 @@ def register(mcp: MCPServer) -> None:
     async def get_item_image(
         item_id: UUID, variant: Literal["thumbnail", "medium", "full"] = "medium"
     ) -> ImageContent:
-        """Return the item's photo. thumbnail=400px, medium=800px, full=original upload."""
+        """Return the item's photo. thumbnail=400px, medium=800px, full=original, up to 2400px."""
         async with tool_context() as ctx:
             item = await get_owned_item(ctx, item_id)
             relative = {
