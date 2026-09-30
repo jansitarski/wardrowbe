@@ -27,12 +27,35 @@ async def test_tools_list_requires_auth(mcp_call):
     assert resp.status_code == 401
 
 
+EXPECTED_TOOLS = {
+    "session_info",
+    "get_wardrobe_summary",
+    "list_items",
+    "get_item",
+    "get_item_image",
+    "set_item_tags",
+    "update_item",
+    "archive_item",
+    "restore_item",
+    "log_wear",
+    "log_wash",
+    "list_outfits",
+    "get_outfit",
+    "respond_to_outfit",
+    "submit_outfit_feedback",
+    "create_outfit_suggestion",
+    "create_item_pairing",
+    "create_outfit",
+}
+
+
 @pytest.mark.asyncio
 async def test_tools_list_names(mcp_call):
     resp = await mcp_call("tools/list")
     assert resp.status_code == 200, resp.text
     names = {t["name"] for t in resp.json()["result"]["tools"]}
-    assert "session_info" in names
+    assert names == EXPECTED_TOOLS
+    assert READ_ONLY_TOOLS <= EXPECTED_TOOLS
 
 
 @pytest.mark.asyncio
