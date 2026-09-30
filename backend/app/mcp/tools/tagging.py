@@ -65,14 +65,6 @@ def register(mcp: MCPServer) -> None:
         return await _apply_update(item_id, payload)
 
     @mcp.tool()
-    async def retag_item(item_id: UUID) -> dict:
-        """Send an item back to the pending tagging queue (clears tagged_by/tagged_at)."""
-        async with tool_context() as ctx:
-            item = await get_owned_item(ctx, item_id)
-            item = await ItemService(ctx.db).mark_pending(item)
-            return item_dump(item)
-
-    @mcp.tool()
     async def update_item(
         item_id: UUID,
         name: str | None = None,

@@ -1,8 +1,6 @@
-"""MCP tagging tools: set_item_tags write-back stamping, retag_item, update_item."""
+"""MCP tagging tools: set_item_tags write-back stamping, update_item."""
 
 import pytest
-
-from app.models.item import TaggingStatus
 
 from .test_mcp_items import _make_item
 
@@ -42,15 +40,6 @@ async def test_set_item_tags_rewrite_keeps_manual(call_tool, db_session, test_us
     second = await call_tool("set_item_tags", {"item_id": str(item.id), "colors": ["red"]})
     assert second["tagged_by"] == "manual"
     assert second["colors"] == ["red"]
-
-
-@pytest.mark.asyncio
-async def test_retag_item_resets_to_pending(call_tool, db_session, test_user):
-    item = await _make_item(db_session, test_user, tagging_status=TaggingStatus.tagged)
-    result = await call_tool("retag_item", {"item_id": str(item.id)})
-    assert result["tagging_status"] == "pending"
-    assert result["tagged_by"] is None
-    assert result["tagged_at"] is None
 
 
 @pytest.mark.asyncio
