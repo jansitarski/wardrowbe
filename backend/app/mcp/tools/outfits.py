@@ -51,7 +51,7 @@ async def outfit_dump(ctx: ToolContext, outfit: Outfit) -> dict:
 
 def register(mcp: MCPServer) -> None:
     @mcp.tool()
-    async def get_recent_outfits(
+    async def list_outfits(
         page: int = 1,
         page_size: int = 10,
         status: str | None = None,
@@ -61,7 +61,8 @@ def register(mcp: MCPServer) -> None:
         date_to: date | None = None,
     ) -> dict:
         """List the user's outfits, newest first. Filter by status
-        (pending/accepted/rejected/skipped/...), occasion, source, or date range."""
+        (pending/accepted/rejected/skipped/...), occasion, source
+        (scheduled/on_demand/manual/pairing/external), or scheduled date range."""
         page, page_size = clamp_page(page, page_size)
         async with tool_context() as ctx:
             filters = OutfitListFilters(

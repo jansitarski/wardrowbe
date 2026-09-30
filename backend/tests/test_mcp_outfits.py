@@ -22,17 +22,17 @@ async def _make_outfit(db_session, user, items=None, occasion="casual"):
 
 
 @pytest.mark.asyncio
-async def test_get_recent_outfits(call_tool, db_session, test_user):
+async def test_list_outfits(call_tool, db_session, test_user):
     await _make_outfit(db_session, test_user)
-    result = await call_tool("get_recent_outfits", {"page_size": 5})
+    result = await call_tool("list_outfits", {"page_size": 5})
     assert result["total"] == 1
     assert result["outfits"][0]["source"] == "external"
 
 
 @pytest.mark.asyncio
-async def test_get_recent_outfits_status_filter(call_tool, db_session, test_user):
+async def test_list_outfits_status_filter(call_tool, db_session, test_user):
     await _make_outfit(db_session, test_user)
-    result = await call_tool("get_recent_outfits", {"status": "accepted"})
+    result = await call_tool("list_outfits", {"status": "accepted"})
     assert result["total"] == 0
 
 
