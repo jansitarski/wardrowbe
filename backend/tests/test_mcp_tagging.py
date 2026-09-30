@@ -2,6 +2,9 @@
 
 import pytest
 
+from app.models.item import TaggingStatus
+from app.services.ai_service import VALID_TYPES
+
 from .test_mcp_items import _make_item
 
 
@@ -64,6 +67,10 @@ async def test_set_item_tags_rejects_unsupported_type(call_tool_raw, db_session,
     result = await call_tool_raw("set_item_tags", {"item_id": str(item.id), "type": "tights"})
     assert result["isError"] is True
     assert "tights" in result["content"][0]["text"]
+    await db_session.refresh(item)
+    assert item.type == "top"
+    assert item.tagging_status == TaggingStatus.pending
+    assert item.tagged_by is None
 
 
 @pytest.mark.asyncio
@@ -73,5 +80,5 @@ async def test_set_item_tags_schema_enumerates_types(mcp_call):
     tools = {t["name"]: t for t in resp.json()["result"]["tools"]}
     type_schema = tools["set_item_tags"]["inputSchema"]["properties"]["type"]
     enum = next(opt["enum"] for opt in type_schema["anyOf"] if "enum" in opt)
-    assert "jeans" in enum
+    assert set(enum) == VALID_TYPES
     assert "tights" not in enum

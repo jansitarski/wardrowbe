@@ -46,7 +46,8 @@ def register(mcp: MCPServer) -> None:
         fit: str | None = None,
     ) -> dict:
         """Write tags back to an item (external tagging). The tags payload is
-        replaced as a whole; non-empty content marks the item tagged (tagged_by=manual)."""
+        replaced as a whole; non-empty content marks the item tagged (tagged_by=manual).
+        type is limited to the vision vocabulary; other types can only be set in the web UI."""
         tags = _present(
             colors=colors,
             primary_color=primary_color,
@@ -57,7 +58,7 @@ def register(mcp: MCPServer) -> None:
             formality=formality,
             fit=fit,
         )
-        payload = _present(type=type, subtype=subtype, colors=colors, primary_color=primary_color)
+        payload = _present(type=type, subtype=subtype)
         if tags:
             payload["tags"] = tags
         if not payload:
