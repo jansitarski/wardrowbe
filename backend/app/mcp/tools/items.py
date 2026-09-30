@@ -12,7 +12,7 @@ from app.schemas.item import ItemFilter, ItemListResponse, ItemResponse
 from app.services.image_service import ImageService
 from app.services.item_service import ItemService
 
-from ..runtime import ToolContext, tool_context
+from ..runtime import READ_ONLY, ToolContext, tool_context
 
 MAX_PAGE_SIZE = 100
 
@@ -43,7 +43,7 @@ def item_list_dump(items: list[ClothingItem], total: int, page: int, page_size: 
 
 
 def register(mcp: MCPServer) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def list_items(
         page: int = 1,
         page_size: int = 20,
@@ -75,13 +75,13 @@ def register(mcp: MCPServer) -> None:
             )
             return item_list_dump(items, total, page, page_size)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_item(item_id: UUID) -> dict:
         """Fetch one clothing item: tags, lifecycle state, wear/wash counters, image URLs."""
         async with tool_context() as ctx:
             return item_dump(await get_owned_item(ctx, item_id))
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_item_image(
         item_id: UUID, variant: Literal["thumbnail", "medium", "full"] = "medium"
     ) -> ImageContent:

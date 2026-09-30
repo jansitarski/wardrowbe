@@ -41,3 +41,24 @@ async def test_session_info(call_tool, test_user):
     assert result["user"]["email"] == test_user.email
     assert result["user"]["timezone"] == "UTC"
     assert set(result["ai"]) == {"vision", "text"}
+
+
+READ_ONLY_TOOLS = {
+    "session_info",
+    "get_wardrobe_summary",
+    "list_items",
+    "get_item",
+    "get_item_image",
+    "list_outfits",
+    "get_outfit",
+}
+
+
+@pytest.mark.asyncio
+async def test_read_tools_carry_read_only_hint(mcp_call):
+    resp = await mcp_call("tools/list")
+    assert resp.status_code == 200, resp.text
+    tools = {t["name"]: t for t in resp.json()["result"]["tools"]}
+    for name, tool in tools.items():
+        read_only = tool.get("annotations", {}).get("readOnlyHint", False)
+        assert read_only == (name in READ_ONLY_TOOLS), name

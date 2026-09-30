@@ -22,7 +22,7 @@ from app.services.outfit_service import OutfitListFilters, OutfitService
 from app.services.studio_service import ItemOwnershipError
 from app.services.suggestion_cache import clear_suggestions
 
-from ..runtime import ToolContext, tool_context, validated
+from ..runtime import READ_ONLY, ToolContext, tool_context, validated
 from .items import clamp_page
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ async def outfit_dump(ctx: ToolContext, outfit: Outfit) -> dict:
 
 
 def register(mcp: MCPServer) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def list_outfits(
         page: int = 1,
         page_size: int = 10,
@@ -84,7 +84,7 @@ def register(mcp: MCPServer) -> None:
                 has_more=(page * page_size) < total,
             ).model_dump(mode="json")
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_outfit(outfit_id: UUID) -> dict:
         """Fetch one outfit with its items, attributes, feedback, and image URLs."""
         async with tool_context() as ctx:

@@ -4,11 +4,11 @@ from app.config import get_settings
 from app.schemas.item import ItemFilter
 from app.services.item_service import ItemService
 
-from ..runtime import tool_context
+from ..runtime import READ_ONLY, tool_context
 
 
 def register(mcp: MCPServer) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def session_info() -> dict:
         """Describe the authenticated user and the backend's AI capability flags."""
         async with tool_context() as ctx:
@@ -27,7 +27,7 @@ def register(mcp: MCPServer) -> None:
                 },
             }
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_wardrobe_summary() -> dict:
         """Aggregate wardrobe stats: totals, tagging queue size, wash queue size,
         type and color distributions."""
