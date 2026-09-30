@@ -1,4 +1,4 @@
-"""MCP lifecycle tools: archive/restore, wear/wash logging, wash queue."""
+"""MCP lifecycle tools: archive/restore, wear/wash logging."""
 
 from datetime import date
 
@@ -38,12 +38,3 @@ async def test_log_wash_rejects_clean_item(call_tool_raw, db_session, test_user)
     result = await call_tool_raw("log_wash", {"item_id": str(item.id)})
     assert result["isError"] is True
     assert "already clean" in result["content"][0]["text"]
-
-
-@pytest.mark.asyncio
-async def test_get_items_to_wash(call_tool, db_session, test_user):
-    await _make_item(db_session, test_user, needs_wash=True)
-    await _make_item(db_session, test_user)
-    result = await call_tool("get_items_to_wash")
-    assert result["total"] == 1
-    assert result["items"][0]["needs_wash"] is True

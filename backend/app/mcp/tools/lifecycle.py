@@ -4,12 +4,12 @@ from uuid import UUID
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from app.schemas.item import ArchiveRequest, ItemFilter
+from app.schemas.item import ArchiveRequest
 from app.services.item_service import ItemService
 from app.utils.timezone import get_user_today
 
 from ..runtime import tool_context, validated
-from .items import clamp_page, get_owned_item, item_dump, item_list_dump
+from .items import get_owned_item, item_dump
 
 
 def register(mcp: MCPServer) -> None:
@@ -69,13 +69,3 @@ def register(mcp: MCPServer) -> None:
             )
             await ctx.db.refresh(item)
             return item_dump(item)
-
-    @mcp.tool()
-    async def get_items_to_wash(page: int = 1, page_size: int = 20) -> dict:
-        """List items whose wear count has reached their wash interval."""
-        page, page_size = clamp_page(page, page_size)
-        async with tool_context() as ctx:
-            items, total = await ItemService(ctx.db).get_list(
-                ctx.user.id, ItemFilter(needs_wash=True), page=page, page_size=page_size
-            )
-            return item_list_dump(items, total, page, page_size)
