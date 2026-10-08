@@ -3,7 +3,7 @@ from datetime import date, datetime
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import Select, and_, func, select
+from sqlalchemy import Select, and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -14,8 +14,13 @@ from app.models.outfit import (
     OutfitItem,
     OutfitSource,
     OutfitStatus,
+    UserFeedback,
 )
 from app.models.user import User
+from app.schemas.item import DEFAULT_WASH_INTERVALS
+from app.schemas.outfit import FeedbackRequest
+from app.services.studio_service import StudioService
+from app.utils.timezone import get_user_today
 
 
 @dataclass
@@ -197,3 +202,67 @@ class OutfitService:
                 detail="User is not in your family",
             )
         return family_member_id
+
+    async def apply_feedback(
+        self, user: User, outfit: Outfit, request: FeedbackRequest
+    ) -> UserFeedback:
+        if outfit.feedback:
+            feedback = outfit.feedback
+        else:
+            feedback = UserFeedback(outfit_id=outfit.id)
+            outfit.feedback = feedback
+            self.db.add(feedback)
+
+        if request.accepted is not None:
+            feedback.accepted = request.accepted
+            outfit.status = OutfitStatus.accepted if request.accepted else OutfitStatus.rejected
+            outfit.responded_at = datetime.utcnow()
+
+        if request.rating is not None:
+            feedback.rating = request.rating
+        if request.comfort_rating is not None:
+            feedback.comfort_rating = request.comfort_rating
+        if request.style_rating is not None:
+            feedback.style_rating = request.style_rating
+        if request.comment is not None:
+            feedback.comment = request.comment
+        if request.worn and not feedback.worn_at:
+            user_today = get_user_today(user)
+            feedback.worn_at = user_today
+            for outfit_item in outfit.items:
+                item = outfit_item.item
+                effective_interval = (
+                    item.wash_interval
+                    if item.wash_interval is not None
+                    else DEFAULT_WASH_INTERVALS.get(item.type, 3)
+                )
+                await self.db.execute(
+                    update(ClothingItem)
+                    .where(ClothingItem.id == item.id)
+                    .values(
+                        wear_count=ClothingItem.wear_count + 1,
+                        last_worn_at=user_today,
+                        wears_since_wash=ClothingItem.wears_since_wash + 1,
+                        needs_wash=ClothingItem.wears_since_wash + 1 >= effective_interval,
+                    )
+                )
+        if request.worn_with_modifications is not None:
+            feedback.worn_with_modifications = request.worn_with_modifications
+        if request.modification_notes is not None:
+            feedback.modification_notes = request.modification_notes
+        if request.actually_worn is not None:
+            feedback.actually_worn = request.actually_worn
+        if request.wore_instead_items is not None:
+            feedback.wore_instead_items = [str(item_id) for item_id in request.wore_instead_items]
+            if request.wore_instead_items:
+                studio_service = StudioService(self.db)
+                await studio_service.create_wore_instead(
+                    user=user,
+                    original_outfit_id=outfit.id,
+                    item_ids=list(request.wore_instead_items),
+                    rating=request.rating,
+                    comment=request.comment,
+                    scheduled_for=None,
+                )
+
+        return feedback

@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import UUID
 
 from pydantic import AfterValidator, BaseModel, Field, field_validator
 
@@ -69,3 +70,22 @@ class OutfitAttributeFields(BaseModel):
     def collapse_empty_palette(cls, v: list[str] | None) -> list[str] | None:
         # [] collapses to None so "no palette" has a single representation
         return v or None
+
+
+class FeedbackRequest(BaseModel):
+    accepted: bool | None = Field(None, description="Whether outfit was accepted")
+    rating: int | None = Field(None, ge=1, le=5, description="Overall rating 1-5")
+    comfort_rating: int | None = Field(None, ge=1, le=5, description="Comfort rating 1-5")
+    style_rating: int | None = Field(None, ge=1, le=5, description="Style rating 1-5")
+    comment: str | None = Field(None, max_length=1000, description="Optional comment")
+    worn: bool | None = Field(None, description="Whether the outfit was worn")
+    worn_with_modifications: bool | None = Field(
+        None, description="If worn, whether modifications were made"
+    )
+    modification_notes: str | None = Field(None, max_length=500)
+    actually_worn: bool | None = Field(
+        None, description="Did user actually wear this recommendation?"
+    )
+    wore_instead_items: list[UUID] | None = Field(
+        None, description="Item IDs user wore instead of recommendation"
+    )
