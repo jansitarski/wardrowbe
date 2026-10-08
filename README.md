@@ -205,6 +205,32 @@ to an external agent. You can also disable a single capability with
 reported at `GET /api/v1/capabilities`. Defaults keep internal AI **on**, so
 existing deployments are unaffected.
 
+### Built-in MCP server (optional)
+
+Set `MCP_ENABLED=true` to serve a [Model Context Protocol](https://modelcontextprotocol.io)
+endpoint at `/api/v1/mcp`. Its tools cover item browsing and tagging, wear/wash logging,
+outfit review and feedback, and external outfit authoring, all scoped to the
+authenticated user — an MCP-connected assistant can run the whole external-agent
+loop against it, including when internal AI is disabled. Clients authenticate
+with the same bearer JWT as the REST API (mint one via `POST /api/v1/auth/sync`):
+
+```bash
+claude mcp add --transport http wardrowbe https://your-host/api/v1/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+The token expires after 7 days; mint a new one and update the client header
+when it does. The endpoint is meant for server-side MCP clients and does not
+answer browser CORS preflights.
+
+To add an item, a client calls `create_item_upload` and POSTs the photo to the
+returned one-time link (`curl -F image=@photo.jpg <upload_url>`). The link is
+built from `APP_URL` (the public app URL, which proxies `/api/v1`), so it must be
+reachable from the MCP client.
+
+The capability is advertised as `features.builtin_mcp` on `GET /api/v1/capabilities`.
+The endpoint is off by default and returns 404 when disabled.
+
 ### Using Ollama (Recommended for Self-Hosting)
 
 **Free, runs locally, no API key needed, works offline**
