@@ -3,7 +3,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.mcp.auth import MCPAuthMiddleware
-from app.mcp.tools import items, lifecycle, overview, tagging
+from app.mcp.tools import items, lifecycle, outfits, overview, tagging
 
 SERVER_NAME = "wardrowbe"
 SERVER_INSTRUCTIONS = (
@@ -13,7 +13,7 @@ SERVER_INSTRUCTIONS = (
 
 MCP_PATH = "/api/v1/mcp"
 
-_TOOL_MODULES = (overview, items, tagging, lifecycle)
+_TOOL_MODULES = (overview, items, tagging, lifecycle, outfits)
 
 
 # A Starlette mount answers the exact mount path with a 307 slash redirect, which strict MCP
