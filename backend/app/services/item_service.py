@@ -581,6 +581,22 @@ class ItemService:
             "most_common_occasion": most_common_occasion,
         }
 
+    async def get_queue_counts(self, user_id: UUID) -> dict[str, int]:
+        result = await self.db.execute(
+            select(
+                func.count(),
+                func.count().filter(ClothingItem.tagging_status == TaggingStatus.pending),
+                func.count().filter(ClothingItem.needs_wash.is_(True)),
+            ).where(
+                and_(
+                    ClothingItem.user_id == user_id,
+                    ClothingItem.is_archived == False,  # noqa: E712
+                )
+            )
+        )
+        total, pending, needs_wash = result.one()
+        return {"total": total, "pending_tagging": pending, "needs_wash": needs_wash}
+
     async def get_item_types(self, user_id: UUID) -> list[dict]:
         result = await self.db.execute(
             select(ClothingItem.type, func.count(ClothingItem.id).label("count"))

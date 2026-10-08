@@ -27,6 +27,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.main import app
 from app.models import User, UserPreference
+from app.models.item import ClothingItem, ItemStatus, TaggingStatus
 
 # Test database URL from environment — set in docker-compose.dev.yml, never falls back to DATABASE_URL.
 TEST_DATABASE_URL = os.environ["TEST_DATABASE_URL"]
@@ -257,3 +258,42 @@ def call_tool(call_tool_raw):
         return result.get("structuredContent") or json.loads(result["content"][0]["text"])
 
     return _tool
+
+
+@pytest.fixture
+def make_item(db_session: AsyncSession):
+    async def _make(user: User, **overrides) -> ClothingItem:
+        item = ClothingItem(
+            **{
+                "user_id": user.id,
+                "type": "top",
+                "name": f"Item {uuid4().hex[:6]}",
+                "image_path": f"{user.id}/{uuid4().hex}.webp",
+                "status": ItemStatus.ready,
+                "tagging_status": TaggingStatus.pending,
+                **overrides,
+            }
+        )
+        db_session.add(item)
+        await db_session.commit()
+        await db_session.refresh(item)
+        return item
+
+    return _make
+
+
+@pytest_asyncio.fixture
+async def other_user(db_session: AsyncSession) -> User:
+    user = User(
+        id=uuid4(),
+        external_id=f"other-{uuid4()}",
+        email=f"other-{uuid4()}@example.com",
+        display_name="Other",
+        timezone="UTC",
+        is_active=True,
+        onboarding_completed=False,
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    return user
