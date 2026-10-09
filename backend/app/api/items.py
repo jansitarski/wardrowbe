@@ -48,9 +48,11 @@ from app.schemas.item import (
 )
 from app.services.image_service import ImageService
 from app.services.item_service import ItemService, stamp_manual_tag_writeback
+from app.services.user_service import UserService
 from app.utils.auth import get_current_user
 from app.utils.signed_urls import sign_image_url
 from app.utils.timezone import get_user_today
+from app.utils.upload_tokens import redeem_upload_token
 from app.utils.uploads import UploadTooLargeError, read_upload_within_limit
 from app.workers.queues import IMAGE_QUEUE, TAGGING_QUEUE, queue_for_kind
 from app.workers.settings import get_redis_settings
@@ -273,6 +275,23 @@ async def create_item(
         favorite=favorite,
     )
     item = await _store_new_item(db, current_user, image, item_data, skip_ai)
+    return ItemResponse.model_validate(item)
+
+
+@router.post("/uploads/{token}", response_model=ItemResponse, status_code=status.HTTP_201_CREATED)
+async def create_item_from_upload_link(
+    token: str,
+    db: DbSession,
+    image: UploadFile = File(...),
+) -> ItemResponse:
+    claim = await redeem_upload_token(token) if settings.mcp_enabled else None
+    user = await UserService(db).get_by_id(UUID(claim["user_id"])) if claim else None
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Upload link not found or expired"
+        )
+    item_data = ItemCreate.model_validate(claim["item"])
+    item = await _store_new_item(db, user, image, item_data, claim["skip_ai"])
     return ItemResponse.model_validate(item)
 
 

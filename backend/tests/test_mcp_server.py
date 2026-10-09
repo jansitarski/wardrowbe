@@ -60,6 +60,7 @@ EXPECTED_TOOLS = {
     "list_items",
     "get_item",
     "get_item_image",
+    "create_item_upload",
     "set_item_tags",
     "update_item",
     "archive_item",
