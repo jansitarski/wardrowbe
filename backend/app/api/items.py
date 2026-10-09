@@ -166,22 +166,9 @@ async def list_items(
     )
 
 
-@router.post("", response_model=ItemResponse, status_code=status.HTTP_201_CREATED)
-async def create_item(
-    db: DbSession,
-    current_user: Annotated[User, Depends(get_current_user)],
-    image: UploadFile = File(...),
-    type: str | None = Form(None),  # Optional - AI will detect if not provided
-    subtype: str | None = Form(None),
-    name: str | None = Form(None),
-    brand: str | None = Form(None),
-    notes: str | None = Form(None),
-    colors: str | None = Form(None),
-    primary_color: str | None = Form(None),
-    favorite: bool = Form(False),
-    skip_ai: bool = Form(False),
-) -> ItemResponse:
-    # Validate and process image
+async def _store_new_item(
+    db: AsyncSession, user: User, image: UploadFile, item_data: ItemCreate, skip_ai: bool
+) -> ClothingItem:
     image_service = ImageService()
     item_service = ItemService(db)
 
@@ -197,7 +184,7 @@ async def create_item(
     # Compute hash and check for duplicates BEFORE storing
     try:
         image_hash = image_service.compute_phash(content, image.filename or "upload.jpg")
-        existing = await item_service.find_duplicate_by_hash(current_user.id, image_hash)
+        existing = await item_service.find_duplicate_by_hash(user.id, image_hash)
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -212,7 +199,7 @@ async def create_item(
     # Process and store image
     try:
         image_paths = await image_service.process_and_store(
-            user_id=current_user.id,
+            user_id=user.id,
             image_data=content,
             original_filename=image.filename or "upload.jpg",
         )
@@ -222,23 +209,8 @@ async def create_item(
             detail=str(e),
         ) from None
 
-    # Parse colors from comma-separated string
-    color_list = colors.split(",") if colors else None
-
-    # Create item - use "unknown" if type not provided (AI will detect)
-    item_data = ItemCreate(
-        type=type or "unknown",
-        subtype=subtype,
-        name=name,
-        brand=brand,
-        notes=notes,
-        colors=color_list,
-        primary_color=primary_color,
-        favorite=favorite,
-    )
-
     item = await item_service.create(
-        user_id=current_user.id,
+        user_id=user.id,
         item_data=item_data,
         image_paths=image_paths,
     )
@@ -271,6 +243,36 @@ async def create_item(
     else:
         item = await item_service.mark_pending(item, set_ready=True)
 
+    return item
+
+
+@router.post("", response_model=ItemResponse, status_code=status.HTTP_201_CREATED)
+async def create_item(
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
+    image: UploadFile = File(...),
+    type: str | None = Form(None),  # Optional - AI will detect if not provided
+    subtype: str | None = Form(None),
+    name: str | None = Form(None),
+    brand: str | None = Form(None),
+    notes: str | None = Form(None),
+    colors: str | None = Form(None),
+    primary_color: str | None = Form(None),
+    favorite: bool = Form(False),
+    skip_ai: bool = Form(False),
+) -> ItemResponse:
+    # Create item - use "unknown" if type not provided (AI will detect)
+    item_data = ItemCreate(
+        type=type or "unknown",
+        subtype=subtype,
+        name=name,
+        brand=brand,
+        notes=notes,
+        colors=colors.split(",") if colors else None,
+        primary_color=primary_color,
+        favorite=favorite,
+    )
+    item = await _store_new_item(db, current_user, image, item_data, skip_ai)
     return ItemResponse.model_validate(item)
 
 
