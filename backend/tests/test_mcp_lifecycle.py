@@ -1,6 +1,6 @@
-from datetime import date
-
 import pytest
+
+from app.utils.timezone import get_user_today
 
 
 @pytest.mark.asyncio
@@ -17,7 +17,7 @@ async def test_log_wear_defaults_to_user_today(call_tool, make_item, test_user):
     item = await make_item(test_user)
     result = await call_tool("log_wear", {"item_id": str(item.id), "occasion": "Office"})
     assert result["wear_count"] == 1
-    assert result["last_worn_at"] == date.today().isoformat()
+    assert result["last_worn_at"] == get_user_today(test_user).isoformat()
 
 
 @pytest.mark.asyncio
