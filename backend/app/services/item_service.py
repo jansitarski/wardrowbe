@@ -1,13 +1,37 @@
 from collections import Counter
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import attributes, selectinload
 
-from app.models.item import ClothingItem, ItemHistory, ItemStatus, TaggingStatus, WashHistory
+from app.models.item import (
+    ClothingItem,
+    ItemHistory,
+    ItemStatus,
+    TaggedBy,
+    TaggingStatus,
+    WashHistory,
+)
 from app.schemas.item import DEFAULT_WASH_INTERVALS, ItemCreate, ItemFilter, ItemUpdate
+
+TAG_WRITEBACK_FIELDS = {"type", "subtype", "colors", "primary_color", "tags"}
+_EMPTY_TAG_VALUES = (None, "", [], {})
+
+
+def _has_tag_content(field: str, value: Any) -> bool:
+    if field == "tags" and isinstance(value, dict):
+        return any(v not in _EMPTY_TAG_VALUES for v in value.values())
+    return value not in _EMPTY_TAG_VALUES
+
+
+def stamp_manual_tag_writeback(item: ClothingItem, update_data: dict) -> None:
+    if any(_has_tag_content(f, update_data.get(f)) for f in TAG_WRITEBACK_FIELDS):
+        item.tagging_status = TaggingStatus.tagged
+        item.tagged_by = TaggedBy.manual
+        item.tagged_at = datetime.now(UTC)
 
 
 class ItemService:
@@ -246,17 +270,10 @@ class ItemService:
         if "tags" in update_data:
             attributes.flag_modified(item, "tags")
             tag_data = update_data["tags"] or {}
-            for column in (
-                "colors",
-                "primary_color",
-                "pattern",
-                "material",
-                "style",
-                "season",
-                "formality",
-            ):
-                if column in tag_data:
-                    setattr(item, column, tag_data[column])
+            for column in ("primary_color", "pattern", "material", "formality"):
+                setattr(item, column, tag_data.get(column))
+            for column in ("colors", "style", "season"):
+                setattr(item, column, tag_data.get(column) or [])
 
         await self.db.flush()
         # Re-fetch with eager loading to ensure relationships are properly loaded
@@ -556,6 +573,22 @@ class ItemService:
             "wear_by_day_of_week": wear_by_day,
             "most_common_occasion": most_common_occasion,
         }
+
+    async def get_queue_counts(self, user_id: UUID) -> dict[str, int]:
+        result = await self.db.execute(
+            select(
+                func.count(),
+                func.count().filter(ClothingItem.tagging_status == TaggingStatus.pending),
+                func.count().filter(ClothingItem.needs_wash.is_(True)),
+            ).where(
+                and_(
+                    ClothingItem.user_id == user_id,
+                    ClothingItem.is_archived == False,  # noqa: E712
+                )
+            )
+        )
+        total, pending, needs_wash = result.one()
+        return {"total": total, "pending_tagging": pending, "needs_wash": needs_wash}
 
     async def get_item_types(self, user_id: UUID) -> list[dict]:
         result = await self.db.execute(
