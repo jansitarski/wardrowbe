@@ -64,15 +64,22 @@ async def test_submit_outfit_feedback(call_tool, make_outfit, test_user):
     assert item["wear_count"] == 1
 
 
-async def _failing_learning(self, outfit_id, user_id):
-    await self.db.execute(text("SELECT 1/0"))
+def _fail_learning(monkeypatch, target):
+    calls = []
+
+    async def failing(self, outfit_id, user_id):
+        calls.append(outfit_id)
+        await self.db.execute(text("SELECT 1/0"))
+
+    monkeypatch.setattr(target, failing)
+    return calls
 
 
 @pytest.mark.asyncio
 async def test_submit_outfit_feedback_survives_learning_failure(
     call_tool, db_session, make_outfit, test_user, monkeypatch
 ):
-    monkeypatch.setattr("app.mcp.tools.outfits.LearningService.process_feedback", _failing_learning)
+    calls = _fail_learning(monkeypatch, "app.mcp.tools.outfits.LearningService.process_feedback")
     outfit = await make_outfit(test_user)
     result = await call_tool(
         "submit_outfit_feedback", {"outfit_id": str(outfit.id), "rating": 4, "comment": "kept"}
@@ -80,6 +87,7 @@ async def test_submit_outfit_feedback_survives_learning_failure(
     assert result["rating"] == 4
     await db_session.refresh(outfit, ["feedback"])
     assert outfit.feedback.comment == "kept"
+    assert calls == [outfit.id]
 
 
 @pytest.mark.asyncio

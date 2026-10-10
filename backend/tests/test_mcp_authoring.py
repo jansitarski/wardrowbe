@@ -83,17 +83,23 @@ async def test_create_outfit_respects_studio_kill_switch(
     assert "studio" in result["content"][0]["text"].lower()
 
 
-async def _failing_learning(self, outfit_id, user_id):
-    await self.db.execute(text("SELECT 1/0"))
+def _fail_learning(monkeypatch, target):
+    calls = []
+
+    async def failing(self, outfit_id, user_id):
+        calls.append(outfit_id)
+        await self.db.execute(text("SELECT 1/0"))
+
+    monkeypatch.setattr(target, failing)
+    return calls
 
 
 @pytest.mark.asyncio
 async def test_create_outfit_survives_learning_failure(
     call_tool, db_session, make_item, test_user, monkeypatch
 ):
-    monkeypatch.setattr(
-        "app.mcp.tools.authoring.LearningService.process_feedback", _failing_learning
-    )
+    calls = _fail_learning(monkeypatch, "app.mcp.tools.authoring.LearningService.process_feedback")
     top = await make_item(test_user, type="top")
     result = await call_tool("create_outfit", {"items": [str(top.id)], "occasion": "casual"})
     assert await db_session.scalar(select(Outfit).where(Outfit.id == result["id"])) is not None
+    assert [str(c) for c in calls] == [result["id"]]
