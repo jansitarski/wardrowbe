@@ -433,6 +433,27 @@ class TestTagsToColumnsProjection:
         assert updated.season == ["summer"]
         assert updated.formality == "casual"
 
+    @pytest.mark.asyncio
+    async def test_replacing_tags_clears_columns_the_new_tags_leave_out(
+        self, db_session: AsyncSession, test_user
+    ):
+        service = ItemService(db_session)
+        item = await service.create(
+            user_id=test_user.id,
+            item_data=ItemCreate(type="unknown"),
+            image_paths={"image_path": "test/projection-replace.jpg"},
+        )
+        await service.update(
+            item,
+            ItemUpdate(tags=ItemTags(colors=["red"], material="cotton", style=["casual"])),
+        )
+
+        updated = await service.update(item, ItemUpdate(tags=ItemTags(colors=["blue"])))
+
+        assert updated.colors == ["blue"]
+        assert updated.material is None
+        assert updated.style == []
+
 
 class TestWorkerTaggingOrigin:
     @pytest.mark.asyncio

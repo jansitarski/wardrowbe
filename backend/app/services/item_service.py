@@ -270,17 +270,10 @@ class ItemService:
         if "tags" in update_data:
             attributes.flag_modified(item, "tags")
             tag_data = update_data["tags"] or {}
-            for column in (
-                "colors",
-                "primary_color",
-                "pattern",
-                "material",
-                "style",
-                "season",
-                "formality",
-            ):
-                if column in tag_data:
-                    setattr(item, column, tag_data[column])
+            for column in ("primary_color", "pattern", "material", "formality"):
+                setattr(item, column, tag_data.get(column))
+            for column in ("colors", "style", "season"):
+                setattr(item, column, tag_data.get(column) or [])
 
         await self.db.flush()
         # Re-fetch with eager loading to ensure relationships are properly loaded
