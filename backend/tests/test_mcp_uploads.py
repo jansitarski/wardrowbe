@@ -92,3 +92,11 @@ async def test_tool_link_round_trip(call_tool, client):
 async def test_tool_validates_fields_before_issuing(call_tool_raw):
     result = await call_tool_raw("create_item_upload", {"name": "x" * 101})
     assert result["isError"] is True
+
+
+@pytest.mark.asyncio
+async def test_tool_refuses_without_app_url(call_tool_raw, monkeypatch):
+    monkeypatch.setattr("app.mcp.tools.items.get_settings", lambda: Settings(app_url=""))
+    result = await call_tool_raw("create_item_upload", {"name": "Grey hoodie"})
+    assert result["isError"] is True
+    assert "APP_URL" in result["content"][0]["text"]

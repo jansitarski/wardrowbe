@@ -226,7 +226,7 @@ answer browser CORS preflights.
 To add an item, a client calls `create_item_upload` and POSTs the photo to the
 returned one-time link (`curl -F image=@photo.jpg <upload_url>`). The link is
 built from `APP_URL` (the public app URL, which proxies `/api/v1`), so it must be
-reachable from the MCP client.
+set and reachable from the MCP client; when it is empty the tool returns an error.
 
 The capability is advertised as `features.builtin_mcp` on `GET /api/v1/capabilities`.
 The endpoint is off by default and returns 404 when disabled.

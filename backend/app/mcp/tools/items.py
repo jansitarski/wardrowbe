@@ -118,6 +118,8 @@ def register(mcp: MCPServer) -> None:
         curl -F image=@photo.jpg <upload_url>; the response is the created item.
         A failed upload uses the link up, so ask for a new one to retry. skip_ai
         leaves the item pending for external tagging even when vision is on."""
+        if not get_settings().app_url:
+            raise ToolError("Upload links need APP_URL set to the public app URL")
         item = validated(
             ItemCreate,
             present(name=name, type=type or None, brand=brand, notes=notes, favorite=favorite),
