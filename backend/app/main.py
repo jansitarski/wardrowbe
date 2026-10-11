@@ -10,12 +10,15 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from app.api.router import api_router
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.database import engine
 from app.logging_config import configure_logging
+from app.mcp.server import MCPDispatchMiddleware, build_mcp_asgi, build_mcp_server
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+mcp_server = build_mcp_server()
 
 
 @asynccontextmanager
@@ -25,8 +28,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if warning:
         logger.error("Configuration: %s", warning)
     logger.info("Auth mode: %s", settings.get_auth_mode())
-    yield
+    async with mcp_server.session_manager.run():
+        yield
     await engine.dispose()
+
+
+def docs_urls(settings: Settings) -> dict[str, str | None]:
+    enabled = settings.dev_mode
+    return {
+        "docs_url": "/docs" if enabled else None,
+        "redoc_url": "/redoc" if enabled else None,
+        "openapi_url": "/openapi.json" if enabled else None,
+    }
 
 
 app = FastAPI(
@@ -34,9 +47,7 @@ app = FastAPI(
     description="AI-powered wardrobe management and outfit recommendations",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs" if settings.debug else None,
-    redoc_url="/redoc" if settings.debug else None,
-    openapi_url="/openapi.json" if settings.debug else None,
+    **docs_urls(settings),
 )
 
 # Configure CORS
@@ -50,6 +61,8 @@ app.add_middleware(
 
 # Enable GZip compression for responses > 500 bytes
 app.add_middleware(GZipMiddleware, minimum_size=500)
+# Dispatched unconditionally; MCPAuthMiddleware 404s when MCP_ENABLED is off
+app.add_middleware(MCPDispatchMiddleware, mcp_app=build_mcp_asgi(mcp_server))
 # Include API router
 app.include_router(api_router, prefix="/api/v1")
 

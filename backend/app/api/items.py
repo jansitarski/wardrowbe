@@ -1,7 +1,7 @@
 import asyncio
 import logging
-from datetime import UTC, datetime
-from typing import Annotated, Any
+from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
 from arq import create_pool
@@ -10,10 +10,20 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from app.api.pagination import PaginationParams
 from app.config import get_settings
 from app.database import DbSession
-from app.models.item import ClothingItem, ItemStatus, TaggedBy, TaggingStatus
+from app.models.item import (
+    ClothingItem,
+    ItemHistory,
+    ItemImage,
+    ItemStatus,
+    ProcessingKind,
+    TaggingStatus,
+)
+from app.models.outfit import Outfit, OutfitItem
 from app.models.user import User
 from app.schemas.item import (
     AnalysisCompletion,
@@ -47,10 +57,12 @@ from app.schemas.item import (
     WashHistoryResponse,
 )
 from app.services.image_service import ImageService
-from app.services.item_service import ItemService
+from app.services.item_service import ItemService, stamp_manual_tag_writeback
+from app.services.user_service import UserService
 from app.utils.auth import get_current_user
-from app.utils.signed_urls import sign_image_url
+from app.utils.signed_urls import sign_optional
 from app.utils.timezone import get_user_today
+from app.utils.upload_tokens import redeem_upload_token
 from app.utils.uploads import UploadTooLargeError, read_upload_within_limit
 from app.workers.queues import IMAGE_QUEUE, TAGGING_QUEUE, queue_for_kind
 from app.workers.settings import get_redis_settings
@@ -61,15 +73,6 @@ settings = get_settings()
 router = APIRouter(prefix="/items", tags=["Items"])
 
 RECENT_ANALYSIS_LIMIT = 10
-
-TAG_WRITEBACK_FIELDS = {"type", "subtype", "colors", "primary_color", "tags"}
-_EMPTY_TAG_VALUES = (None, "", [], {})
-
-
-def _has_tag_content(field: str, value: Any) -> bool:
-    if field == "tags" and isinstance(value, dict):
-        return any(v not in _EMPTY_TAG_VALUES for v in value.values())
-    return value not in _EMPTY_TAG_VALUES
 
 
 async def _resolve_bulk_item_ids(
@@ -128,8 +131,7 @@ async def _read_image_or_413(image: UploadFile) -> bytes:
 async def list_items(
     db: DbSession,
     current_user: Annotated[User, Depends(get_current_user)],
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    pagination: Annotated[PaginationParams, Depends()],
     type: str | None = None,
     subtype: str | None = None,
     colors: str | None = None,
@@ -162,35 +164,22 @@ async def list_items(
     items, total = await item_service.get_list(
         user_id=current_user.id,
         filters=filters,
-        page=page,
-        page_size=page_size,
+        page=pagination.page,
+        page_size=pagination.page_size,
     )
 
     return ItemListResponse(
         items=[ItemResponse.model_validate(item) for item in items],
         total=total,
-        page=page,
-        page_size=page_size,
-        has_more=(page * page_size) < total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+        has_more=pagination.has_more(total),
     )
 
 
-@router.post("", response_model=ItemResponse, status_code=status.HTTP_201_CREATED)
-async def create_item(
-    db: DbSession,
-    current_user: Annotated[User, Depends(get_current_user)],
-    image: UploadFile = File(...),
-    type: str | None = Form(None),  # Optional - AI will detect if not provided
-    subtype: str | None = Form(None),
-    name: str | None = Form(None),
-    brand: str | None = Form(None),
-    notes: str | None = Form(None),
-    colors: str | None = Form(None),
-    primary_color: str | None = Form(None),
-    favorite: bool = Form(False),
-    skip_ai: bool = Form(False),
-) -> ItemResponse:
-    # Validate and process image
+async def _store_new_item(
+    db: AsyncSession, user: User, image: UploadFile, item_data: ItemCreate, skip_ai: bool
+) -> ClothingItem:
     image_service = ImageService()
     item_service = ItemService(db)
 
@@ -206,7 +195,7 @@ async def create_item(
     # Compute hash and check for duplicates BEFORE storing
     try:
         image_hash = image_service.compute_phash(content, image.filename or "upload.jpg")
-        existing = await item_service.find_duplicate_by_hash(current_user.id, image_hash)
+        existing = await item_service.find_duplicate_by_hash(user.id, image_hash)
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -221,7 +210,7 @@ async def create_item(
     # Process and store image
     try:
         image_paths = await image_service.process_and_store(
-            user_id=current_user.id,
+            user_id=user.id,
             image_data=content,
             original_filename=image.filename or "upload.jpg",
         )
@@ -231,23 +220,8 @@ async def create_item(
             detail=str(e),
         ) from None
 
-    # Parse colors from comma-separated string
-    color_list = colors.split(",") if colors else None
-
-    # Create item - use "unknown" if type not provided (AI will detect)
-    item_data = ItemCreate(
-        type=type or "unknown",
-        subtype=subtype,
-        name=name,
-        brand=brand,
-        notes=notes,
-        colors=color_list,
-        primary_color=primary_color,
-        favorite=favorite,
-    )
-
     item = await item_service.create(
-        user_id=current_user.id,
+        user_id=user.id,
         item_data=item_data,
         image_paths=image_paths,
     )
@@ -262,7 +236,7 @@ async def create_item(
         try:
             redis = await create_pool(get_redis_settings())
             try:
-                full_image_path = f"{settings.storage_path}/{image_paths['image_path']}"
+                full_image_path = str(image_service.get_image_path(image_paths["image_path"]))
                 job = await redis.enqueue_job(
                     "tag_item_image",
                     str(item.id),
@@ -280,6 +254,53 @@ async def create_item(
     else:
         item = await item_service.mark_pending(item, set_ready=True)
 
+    return item
+
+
+@router.post("", response_model=ItemResponse, status_code=status.HTTP_201_CREATED)
+async def create_item(
+    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
+    image: UploadFile = File(...),
+    type: str | None = Form(None),  # Optional - AI will detect if not provided
+    subtype: str | None = Form(None),
+    name: str | None = Form(None),
+    brand: str | None = Form(None),
+    notes: str | None = Form(None),
+    colors: str | None = Form(None),
+    primary_color: str | None = Form(None),
+    favorite: bool = Form(False),
+    skip_ai: bool = Form(False),
+) -> ItemResponse:
+    # Create item - use "unknown" if type not provided (AI will detect)
+    item_data = ItemCreate(
+        type=type or "unknown",
+        subtype=subtype,
+        name=name,
+        brand=brand,
+        notes=notes,
+        colors=colors.split(",") if colors else None,
+        primary_color=primary_color,
+        favorite=favorite,
+    )
+    item = await _store_new_item(db, current_user, image, item_data, skip_ai)
+    return ItemResponse.model_validate(item)
+
+
+@router.post("/uploads/{token}", response_model=ItemResponse, status_code=status.HTTP_201_CREATED)
+async def create_item_from_upload_link(
+    token: str,
+    db: DbSession,
+    image: UploadFile = File(...),
+) -> ItemResponse:
+    claim = await redeem_upload_token(token) if settings.mcp_enabled else None
+    user = await UserService(db).get_by_id(UUID(claim["user_id"])) if claim else None
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Upload link not found or expired"
+        )
+    item_data = ItemCreate.model_validate(claim["item"])
+    item = await _store_new_item(db, user, image, item_data, claim["skip_ai"])
     return ItemResponse.model_validate(item)
 
 
@@ -431,7 +452,9 @@ async def bulk_create_items(
                     # `processing` whenever the AI is fast enough to win the race.
                     await db.commit()
                     try:
-                        full_image_path = f"{settings.storage_path}/{image_paths['image_path']}"
+                        full_image_path = str(
+                            image_service.get_image_path(image_paths["image_path"])
+                        )
                         job = await redis.enqueue_job(
                             "tag_item_image",
                             str(item.id),
@@ -685,10 +708,11 @@ async def bulk_analyze_items(
             detail="Failed to connect to job queue",
         ) from None
 
+    image_service = ImageService()
     try:
         for item, job_id in to_enqueue:
             try:
-                full_image_path = f"{settings.storage_path}/{item.image_path}"
+                full_image_path = str(image_service.get_image_path(item.image_path))
                 job = await redis.enqueue_job(
                     "tag_item_image",
                     str(item.id),
@@ -854,7 +878,7 @@ async def bulk_rotate_items(
 
     for item in to_queue:
         item.status = ItemStatus.processing
-        item.processing_kind = "rotate"
+        item.processing_kind = ProcessingKind.rotate
         # Clear any stale ai_started_at from a prior tagging run, otherwise the
         # frontend reads it as this job's elapsed time and shows a wildly wrong
         # duration for what is a sub-second rotation.
@@ -962,7 +986,7 @@ async def bulk_remove_background_items(
 
     for item in to_queue:
         item.status = ItemStatus.processing
-        item.processing_kind = "background_removal"
+        item.processing_kind = ProcessingKind.background_removal
         # Clear any stale ai_started_at left over from a prior tagging run -
         # otherwise the frontend reads it as this job's elapsed "analyzing"
         # time, showing a wildly wrong duration for what is actually a
@@ -1045,8 +1069,8 @@ def _tagging_scope(user_id: UUID) -> tuple:
         # aren't AI tagging - exclude them so they don't pollute this banner's
         # counts. is_distinct_from (not not_in) so a NULL processing_kind,
         # which every ordinary tagging item has, stays included.
-        ClothingItem.processing_kind.is_distinct_from("background_removal"),
-        ClothingItem.processing_kind.is_distinct_from("rotate"),
+        ClothingItem.processing_kind.is_distinct_from(ProcessingKind.background_removal),
+        ClothingItem.processing_kind.is_distinct_from(ProcessingKind.rotate),
     )
 
 
@@ -1098,7 +1122,7 @@ async def _items_being_analyzed(
             item_id=row.id,
             name=row.name,
             type=row.type,
-            image_url=sign_image_url(row.thumbnail_path or row.image_path),
+            image_url=sign_optional(row.thumbnail_path, fallback=row.image_path),
             started_at=row.ai_started_at,
         )
         for row in result
@@ -1275,10 +1299,7 @@ async def update_item(
         )
 
     update_data = item_data.model_dump(exclude_unset=True)
-    if any(_has_tag_content(f, update_data.get(f)) for f in TAG_WRITEBACK_FIELDS):
-        item.tagging_status = TaggingStatus.tagged
-        item.tagged_by = TaggedBy.manual
-        item.tagged_at = datetime.now(UTC)
+    stamp_manual_tag_writeback(item, update_data)
 
     item = await item_service.update(item, item_data)
     return ItemResponse.model_validate(item)
@@ -1392,12 +1413,6 @@ async def get_item_history(
     current_user: Annotated[User, Depends(get_current_user)],
     limit: int = Query(10, ge=1, le=100),
 ) -> list[dict]:
-    from sqlalchemy import select as sa_select
-    from sqlalchemy.orm import selectinload
-
-    from app.models.item import ItemHistory
-    from app.models.outfit import Outfit, OutfitItem
-
     item_service = ItemService(db)
     item = await item_service.get_by_id(item_id, current_user.id)
 
@@ -1409,7 +1424,7 @@ async def get_item_history(
 
     # Eagerly load outfit and its items for context
     result = await db.execute(
-        sa_select(ItemHistory)
+        select(ItemHistory)
         .where(ItemHistory.item_id == item_id)
         .options(
             selectinload(ItemHistory.outfit)
@@ -1438,9 +1453,7 @@ async def get_item_history(
                         "id": str(oi.item.id),
                         "type": oi.item.type,
                         "name": oi.item.name,
-                        "thumbnail_url": sign_image_url(oi.item.thumbnail_path)
-                        if oi.item.thumbnail_path
-                        else None,
+                        "thumbnail_url": sign_optional(oi.item.thumbnail_path),
                     }
                     for oi in sorted(h.outfit.items, key=lambda x: x.position)
                 ],
@@ -1547,6 +1560,8 @@ async def trigger_ai_analysis(
         await db.commit()
         return {"status": "deferred", "reason": "vision disabled"}
 
+    image_service = ImageService()
+
     if item.status == ItemStatus.processing and item.ai_job_id:
         # Dedup: a live job already owns this item. If ai_job_id is None instead,
         # a prior enqueue silently failed and there's nothing to dedup against -
@@ -1578,7 +1593,7 @@ async def trigger_ai_analysis(
         try:
             redis = await create_pool(get_redis_settings())
             try:
-                full_image_path = f"{settings.storage_path}/{image_path}"
+                full_image_path = str(image_service.get_image_path(image_path))
                 enqueued = await redis.enqueue_job(
                     "tag_item_image",
                     str(item_id),
@@ -1609,7 +1624,7 @@ async def trigger_ai_analysis(
 
         redis = await create_pool(get_redis_settings())
         try:
-            full_image_path = f"{settings.storage_path}/{item.image_path}"
+            full_image_path = str(image_service.get_image_path(item.image_path))
             job = await redis.enqueue_job(
                 "tag_item_image",
                 str(item.id),
@@ -1779,7 +1794,8 @@ async def remove_item_background(
         )
 
     recovering_from_error = (
-        item.status == ItemStatus.error and item.processing_kind == "background_removal"
+        item.status == ItemStatus.error
+        and item.processing_kind == ProcessingKind.background_removal
     )
 
     hex_color = request.bg_color.lstrip("#")
@@ -1948,8 +1964,6 @@ async def add_item_image(
     current_user: Annotated[User, Depends(get_current_user)],
     image: UploadFile = File(...),
 ) -> ItemImageResponse:
-    from app.models.item import ItemImage
-
     item_service = ItemService(db)
     item = await item_service.get_by_id(item_id, current_user.id)
 
@@ -1960,8 +1974,6 @@ async def add_item_image(
         )
 
     # Check max images limit
-    from sqlalchemy import func, select
-
     count_result = await db.execute(select(func.count()).where(ItemImage.item_id == item_id))
     current_count = count_result.scalar() or 0
     if current_count >= 4:
@@ -2014,10 +2026,6 @@ async def delete_item_image(
     db: DbSession,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    from sqlalchemy import select
-
-    from app.models.item import ItemImage
-
     item_service = ItemService(db)
     item = await item_service.get_by_id(item_id, current_user.id)
 
@@ -2059,10 +2067,6 @@ async def reorder_item_images(
     db: DbSession,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list[ItemImageResponse]:
-    from sqlalchemy import select
-
-    from app.models.item import ItemImage
-
     item_service = ItemService(db)
     item = await item_service.get_by_id(item_id, current_user.id)
 
@@ -2093,10 +2097,6 @@ async def set_primary_image(
     db: DbSession,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ItemResponse:
-    from sqlalchemy import select
-
-    from app.models.item import ItemImage
-
     item_service = ItemService(db)
     item = await item_service.get_by_id(item_id, current_user.id)
 
