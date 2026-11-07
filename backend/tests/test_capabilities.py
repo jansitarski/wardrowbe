@@ -103,8 +103,20 @@ async def test_capabilities_default_on(client: AsyncClient):
         "external_tagging": True,
         "external_suggestions": True,
         "external_pairings": True,
+        "builtin_mcp": False,
     }
     assert data["version"] == "1.0.0"
+
+
+@pytest.mark.asyncio
+async def test_capabilities_builtin_mcp_enabled(client: AsyncClient, monkeypatch):
+    monkeypatch.setattr(
+        "app.api.health.get_settings",
+        lambda: Settings(mcp_enabled=True),
+    )
+    response = await client.get("/api/v1/capabilities")
+    assert response.status_code == 200
+    assert response.json()["features"]["builtin_mcp"] is True
 
 
 @pytest.mark.asyncio
@@ -241,7 +253,7 @@ async def test_tag_item_image_runs_ai_when_enabled(monkeypatch):
         def __init__(self, *args, **kwargs):
             constructed["called"] = True
 
-        async def analyze_image(self, path):  # pragma: no cover - not reached
+        async def analyze_image(self, path, locale="en"):  # pragma: no cover - not reached
             raise RuntimeError("stop after construction")
 
     monkeypatch.setattr(tagging, "AIService", _StubAI)

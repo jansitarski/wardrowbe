@@ -1,10 +1,13 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
-import { api, setAccessToken } from '@/lib/api';
+import { api } from '@/lib/api';
+import { useSetTokenIfAvailable, applySessionToken } from '@/lib/hooks/use-session-token';
 import { getTodayDateStringInTimezone, resolveTimezone } from '@/lib/utils';
+import { queryKeys } from '@/lib/hooks/query-keys';
+import { readLocaleCookie } from '@/lib/i18n/locales';
 
 export interface UserProfile {
   id: string;
@@ -32,19 +35,12 @@ export interface UserProfileUpdate {
   body_measurements?: Record<string, number | string> | null;
 }
 
-function useSetTokenIfAvailable() {
-  const { data: session } = useSession();
-  if (session?.accessToken) {
-    setAccessToken(session.accessToken as string);
-  }
-}
-
 export function useUserProfile() {
   const { status } = useSession();
   useSetTokenIfAvailable();
 
   return useQuery({
-    queryKey: ['user-profile'],
+    queryKey: queryKeys.userProfile,
     queryFn: () => api.get<UserProfile>('/users/me'),
     enabled: status !== 'loading',
   });
@@ -69,13 +65,30 @@ export function useUpdateUserProfile({ toastsOwnErrors = false } = {}) {
   return useMutation({
     meta: { toastsOwnErrors },
     mutationFn: async (data: UserProfileUpdate) => {
-      if (session?.accessToken) {
-        setAccessToken(session.accessToken as string);
-      }
+      applySessionToken(session);
       return api.patch<UserProfile>('/users/me', data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['user-profile'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.userProfile });
     },
   });
+}
+
+// The UI language comes from the NEXT_LOCALE cookie or Accept-Language, never from the profile,
+// so the profile follows the UI: the tagging worker writes AI descriptions in profile.locale.
+// One attempt per locale because a failed save must not repeat on every profile refetch; the
+// next page load tries again. A tab whose locale no longer matches the cookie was switched away
+// from in another tab, so it must not write its stale language back.
+export function useSyncProfileLocale(uiLocale: string) {
+  const { data: profile } = useUserProfile();
+  const { mutate } = useUpdateUserProfile({ toastsOwnErrors: true });
+  const attempted = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!profile || profile.locale === uiLocale || attempted.current === uiLocale) return;
+    const cookieLocale = readLocaleCookie();
+    if (cookieLocale && cookieLocale !== uiLocale) return;
+    attempted.current = uiLocale;
+    mutate({ locale: uiLocale });
+  }, [profile, uiLocale, mutate]);
 }

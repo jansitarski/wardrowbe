@@ -5,10 +5,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
+from app.models.item import ItemStatus, ProcessingKind, TaggingStatus
 from app.schemas.color import ColorList, ColorName
 from app.schemas.outfit import Occasion
 from app.utils.garment_vocabulary import DEFAULT_WASH_INTERVALS
-from app.utils.signed_urls import sign_image_url
+from app.utils.signed_urls import sign_image_url, sign_optional
 
 
 class ItemTags(BaseModel):
@@ -20,6 +21,17 @@ class ItemTags(BaseModel):
     season: list[str] = Field(default_factory=list)
     formality: str | None = None
     fit: str | None = None
+    # User-owned keys. The AI never emits these, so the tagging worker and
+    # ItemService.update must merge the tags JSONB rather than replace it.
+    size: str | None = Field(None, max_length=32)
+    care_instructions: str | None = Field(None, max_length=255)
+    source_url: str | None = Field(None, max_length=500)
+    # Tag keys changed by hand, kept so a later "re-analyse and replace" can leave them alone.
+    # The server maintains it; whatever a client sends for it is ignored.
+    user_edited_keys: list[str] = Field(default_factory=list)
+
+
+USER_TAG_KEYS = frozenset({"size", "care_instructions", "source_url", "user_edited_keys"})
 
 
 class ItemBase(BaseModel):
@@ -71,7 +83,7 @@ class ItemResponse(ItemBase):
         )
         if isinstance(raw, dict):
             # Same idea for a type the model named but the vocabulary rejected:
-            # lets the UI say "detected 'tights', not a supported type" rather
+            # lets the UI say "detected 'culottes', not a supported type" rather
             # than a bare "unknown".
             for src, dest in (("error", "ai_error"), ("unrecognized_type", "ai_unrecognized_type")):
                 if raw.get(src):
@@ -102,8 +114,8 @@ class ItemResponse(ItemBase):
     ai_error: str | None = None
     ai_unrecognized_type: str | None = None
     ai_started_at: datetime | None = None
-    processing_kind: str | None = None
-    tagging_status: str = "pending"
+    processing_kind: ProcessingKind | None = None
+    tagging_status: TaggingStatus = TaggingStatus.pending
     tagged_by: str | None = None
     tagged_at: datetime | None = None
     wear_count: int = 0
@@ -130,16 +142,12 @@ class ItemResponse(ItemBase):
     @computed_field
     @property
     def thumbnail_url(self) -> str | None:
-        if self.thumbnail_path:
-            return sign_image_url(self.thumbnail_path)
-        return None
+        return sign_optional(self.thumbnail_path)
 
     @computed_field
     @property
     def medium_url(self) -> str | None:
-        if self.medium_path:
-            return sign_image_url(self.medium_path)
-        return None
+        return sign_optional(self.medium_path)
 
     @computed_field
     @property
@@ -202,16 +210,19 @@ class ItemListResponse(BaseModel):
     has_more: bool
 
 
-class ItemFilter(BaseModel):
+class ItemFilterFields(BaseModel):
     type: str | None = None
     subtype: str | None = None
     colors: ColorList | None = None
-    status: str | None = None
-    tagging_status: str | None = None
+    status: ItemStatus | None = None
+    tagging_status: TaggingStatus | None = None
     favorite: bool | None = None
     needs_wash: bool | None = None
     is_archived: bool = False
     search: str | None = None
+
+
+class ItemFilter(ItemFilterFields):
     sort_by: str | None = None
     sort_order: str = "desc"
 
@@ -248,13 +259,13 @@ class BulkUploadResponse(BaseModel):
     results: list[BulkUploadResult]
 
 
-class BulkFilters(BaseModel):
-    type: str | None = None
-    search: str | None = None
-    is_archived: bool | None = None
+class BulkFilters(ItemFilterFields):
+    model_config = ConfigDict(extra="forbid")
 
 
 class BulkSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     # Explicit selection
     item_ids: list[UUID] | None = None
 
@@ -366,16 +377,12 @@ class ItemImageResponse(BaseModel):
     @computed_field
     @property
     def thumbnail_url(self) -> str | None:
-        if self.thumbnail_path:
-            return sign_image_url(self.thumbnail_path)
-        return None
+        return sign_optional(self.thumbnail_path)
 
     @computed_field
     @property
     def medium_url(self) -> str | None:
-        if self.medium_path:
-            return sign_image_url(self.medium_path)
-        return None
+        return sign_optional(self.medium_path)
 
 
 class ReorderImagesRequest(BaseModel):

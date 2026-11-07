@@ -27,13 +27,14 @@ import { AddItemDialog } from '@/components/add-item-dialog';
 import { AnalysisQueuePanel } from '@/components/analysis-queue-panel';
 import { ItemDetailDialog } from '@/components/item-detail-dialog';
 import { BulkActionToolbar, BulkSelection } from '@/components/bulk-action-toolbar';
-import { useItems, useItem, useItemTypes, useReanalyzeItem, useCancelAnalysis, useBulkDeleteItems, useBulkReanalyzeItems, useBulkCancelAnalysis, useBulkRotateItems, useBulkRemoveBackgroundItems, useRemoveBackground, useTaggingProgress, BulkOperationParams, tagProcessingLabel, formatAnalyzingElapsed, deriveQueueSummary } from '@/lib/hooks/use-items';
+import { useItems, useItem, useItemTypes, useReanalyzeItem, useCancelAnalysis, useBulkDeleteItems, useBulkReanalyzeItems, useBulkCancelAnalysis, useBulkRotateItems, useBulkRemoveBackgroundItems, useRemoveBackground, useTaggingProgress, BulkItemFilters, BulkOperationParams, tagProcessingLabel, formatAnalyzingElapsed, deriveQueueSummary } from '@/lib/hooks/use-items';
 import { useUserTimezone } from '@/lib/hooks/use-user';
 import { colorSwatch, normalizeColor } from '@/lib/colors';
 import { Item } from '@/lib/types';
-import { useClothingTypes, useClothingColors, useSubtypeLabel } from '@/lib/hooks/use-translated-constants';
+import { useClothingTypes, useClothingColors, useSubtypeLabel, useTypeLabel } from '@/lib/hooks/use-translated-constants';
 import { toast } from 'sonner';
 import { formatWornAgo, getWornAgoColorClass } from '@/lib/utils';
+import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
 import { useTranslations } from 'next-intl';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -77,6 +78,7 @@ function ItemCard({
   errorDismissed?: boolean;
   userTimezone: string;
 }) {
+  const typeLabel = useTypeLabel();
   const t = useTranslations('wardrobe');
   const tc = useTranslations('common');
   const clothingColors = useClothingColors();
@@ -106,14 +108,14 @@ function ItemCard({
         {item.thumbnail_url ? (
           <Image
             src={item.thumbnail_url}
-            alt={item.name || item.type}
+            alt={item.name || typeLabel(item.type)}
             fill
             className="object-cover"
             sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 20vw"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm">
-            {item.type}
+            {typeLabel(item.type)}
           </div>
         )}
         {/* Checkbox in top-left */}
@@ -245,10 +247,10 @@ function ItemCard({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <p className="font-medium text-sm truncate">
-              {item.name || item.type}
+              {item.name || typeLabel(item.type)}
             </p>
             <p className="text-xs text-muted-foreground capitalize">
-              {item.type}
+              {typeLabel(item.type)}
               {item.subtype && ` • ${subtypeLabel(item.subtype)}`}
               {item.tags?.logprobs_confidence != null && ` · ${t('ai.confident', { percent: Math.round(item.tags.logprobs_confidence * 100) })}`}
             </p>
@@ -354,7 +356,7 @@ export default function WardrobePage() {
   });
   const [pageSize, setPageSize] = useState(() => {
     const raw = Number(searchParams.get('pageSize'));
-    return PAGE_SIZE_OPTIONS.includes(raw) ? raw : 20;
+    return PAGE_SIZE_OPTIONS.includes(raw) ? raw : DEFAULT_PAGE_SIZE;
   });
   const [dismissedErrors, setDismissedErrors] = useState<Set<string>>(() => {
     if (typeof window === 'undefined') return new Set();
@@ -395,7 +397,7 @@ export default function WardrobePage() {
     if (needsWash) params.set('needsWash', 'true'); else params.delete('needsWash');
     if (favoriteFilter) params.set('favorite', 'true'); else params.delete('favorite');
     if (page !== 1) params.set('page', String(page)); else params.delete('page');
-    if (pageSize !== 20) params.set('pageSize', String(pageSize)); else params.delete('pageSize');
+    if (pageSize !== DEFAULT_PAGE_SIZE) params.set('pageSize', String(pageSize)); else params.delete('pageSize');
 
     const next = params.toString();
     if (next !== searchParams.toString()) {
@@ -405,15 +407,14 @@ export default function WardrobePage() {
 
   const sortOption = SORT_OPTIONS[sortIndex];
 
-  const filters = {
+  const listFilters: BulkItemFilters = {
     search: search || undefined,
     type: typeFilter !== 'all' ? typeFilter : undefined,
     needs_wash: needsWash,
     favorite: favoriteFilter,
     is_archived: false,
-    sort_by: sortOption.value,
-    sort_order: sortOption.order,
   };
+  const filters = { ...listFilters, sort_by: sortOption.value, sort_order: sortOption.order };
 
   const activeFilterCount = [
     needsWash !== undefined,
@@ -539,13 +540,7 @@ export default function WardrobePage() {
       return {
         select_all: true,
         excluded_ids: Array.from(selection.excludedIds),
-        filters: {
-          type: typeFilter !== 'all' ? typeFilter : undefined,
-          search: search || undefined,
-          needs_wash: needsWash,
-          favorite: favoriteFilter,
-          is_archived: false,
-        },
+        filters: listFilters,
       };
     } else {
       return {
@@ -943,9 +938,7 @@ export default function WardrobePage() {
         isRotating={bulkRotate.isPending}
         isRemovingBackground={bulkRemoveBackground.isPending}
         variant="items"
-        page={page}
-        pageSize={pageSize}
-        onPageChange={handlePageChange}
+        pagination={{ page, pageSize, onPageChange: handlePageChange }}
       />
 
       <AddItemDialog open={addDialogOpen} onOpenChange={setAddDialogOpen} />
